@@ -12,8 +12,16 @@ export class PlayerState extends Schema {
 export class UnitState extends Schema {
   @type("string") id = "";
   @type("string") ownerId = "";
+  @type("string") classId = "breacher";
+  @type("string") name = "Breacher";
   @type("number") x = 0;
   @type("number") y = 0;
+  @type("number") hp = 0;
+  @type("number") maxHp = 0;
+  @type("number") movementRange = 0;
+  @type("number") attackRange = 0;
+  @type("number") attackDamage = 0;
+  @type("boolean") alive = true;
 }
 
 export class TileState extends Schema {
@@ -22,6 +30,7 @@ export class TileState extends Schema {
   @type("string") tileType = "floor";
   @type("boolean") walkable = true;
   @type("boolean") blocksLineOfSight = false;
+  @type("number") coverValue = 0;
 
   static fromTile(tile: BoardTile): TileState {
     const state = new TileState();
@@ -30,6 +39,7 @@ export class TileState extends Schema {
     state.tileType = tile.type;
     state.walkable = tile.walkable;
     state.blocksLineOfSight = tile.blocksLineOfSight;
+    state.coverValue = tile.coverValue;
     return state;
   }
 }
@@ -39,11 +49,11 @@ export class MatchState extends Schema {
   @type("string") status = "waiting";
   @type("number") currentRound = 0;
   @type("string") activePlayerId = "";
-  @type("number") movesRemaining = 0;
+  @type("number") actionPointsRemaining = 0;
   @type("number") boardWidth = 0;
   @type("number") boardHeight = 0;
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
   @type({ map: UnitState }) units = new MapSchema<UnitState>();
   @type([TileState]) tiles = new ArraySchema<TileState>();
+  @type("string") winnerId = "";
 }
-

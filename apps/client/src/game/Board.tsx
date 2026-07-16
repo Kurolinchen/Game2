@@ -1,15 +1,28 @@
 import { useEffect, useMemo, useRef } from "react";
 import { createBoardGame } from "./createGame";
-import { GameBridge, type TileSelection } from "./GameBridge";
+import {
+  GameBridge,
+  type ActionMode,
+  type BoardInteractionContext,
+  type BoardSelection,
+} from "./GameBridge";
 import type { MatchSnapshot } from "../multiplayer/types";
 
 interface BoardProps {
   snapshot: MatchSnapshot;
   localPlayerId: string;
-  onTileSelected(selection: TileSelection): void;
+  selectedUnitId: string;
+  actionMode: ActionMode;
+  onSelection(selection: BoardSelection): void;
 }
 
-export function Board({ snapshot, localPlayerId, onTileSelected }: BoardProps) {
+export function Board({
+  snapshot,
+  localPlayerId,
+  selectedUnitId,
+  actionMode,
+  onSelection,
+}: BoardProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const bridge = useMemo(() => new GameBridge(), []);
 
@@ -23,16 +36,16 @@ export function Board({ snapshot, localPlayerId, onTileSelected }: BoardProps) {
   }, [bridge]);
 
   useEffect(() => {
-    bridge.publishSnapshot(snapshot, localPlayerId);
-  }, [bridge, snapshot, localPlayerId]);
+    const context: BoardInteractionContext = { selectedUnitId, actionMode };
+    bridge.publishSnapshot(snapshot, localPlayerId, context);
+  }, [actionMode, bridge, snapshot, localPlayerId, selectedUnitId]);
 
   useEffect(() => {
-    bridge.on(GameBridge.TILE_SELECTED, onTileSelected);
+    bridge.on(GameBridge.SELECTION, onSelection);
     return () => {
-      bridge.off(GameBridge.TILE_SELECTED, onTileSelected);
+      bridge.off(GameBridge.SELECTION, onSelection);
     };
-  }, [bridge, onTileSelected]);
+  }, [bridge, onSelection]);
 
   return <div className="board-canvas" ref={parentRef} aria-label="Tactical board" />;
 }
-

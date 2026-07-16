@@ -1,9 +1,14 @@
 import { Client, Room } from "colyseus";
 import {
   GAME_CONFIG,
+  UNIT_CLASS_ORDER,
+  UNIT_DEFINITIONS,
+  applyDamage,
   createWarehouseTiles,
   nextTurn,
-  validateMove,
+  validateAttack,
+  validateMovementAction,
+  type AttackTile,
   type Position,
 } from "@tactics-lite/game-core";
 import { sanitizeDisplayName } from "./displayName.js";
@@ -27,6 +32,11 @@ interface MoveMessage {
   y?: unknown;
 }
 
+interface AttackMessage {
+  attackerId?: unknown;
+  targetId?: unknown;
+}
+
 export class TacticsRoom extends Room<{ state: MatchState }> {
   state = new MatchState();
   maxClients = GAME_CONFIG.room.maxPlayers;
@@ -35,6 +45,8 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     ready: (client: Client) => this.handleReady(client),
     move: (client: Client, payload: MoveMessage) =>
       this.handleMove(client, payload),
+    attack: (client: Client, payload: AttackMessage) =>
+      this.handleAttack(client, payload),
     end_turn: (client: Client) => this.handleEndTurn(client),
   };
 
@@ -88,15 +100,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
   }
 
   private handleMove(client: Client, payload: MoveMessage): void {
-    if (this.state.status !== "playing") {
-      return this.reject(client, "The match is not running.");
-    }
-    if (this.state.activePlayerId !== client.sessionId) {
-      return this.reject(client, "It is not your turn.");
-    }
-    if (this.state.movesRemaining <= 0) {
-      return this.reject(client, "No movement remains this turn.");
-    }
+    if (!this.canAct(client)) return;
     if (
       typeof payload.unitId !== "string" ||
       typeof payload.x !== "number" ||
@@ -106,25 +110,20 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     }
 
     const unit = this.state.units.get(payload.unitId);
-    if (!unit || unit.ownerId !== client.sessionId) {
-      return this.reject(client, "You do not control that unit.");
+    if (!unit || unit.ownerId !== client.sessionId || !unit.alive) {
+      return this.reject(client, "You do not control that active unit.");
     }
 
-    const blocked = [...this.state.tiles.values()]
-      .filter((tile) => !tile.walkable)
-      .map<Position>((tile) => ({ x: tile.x, y: tile.y }));
-    const occupied = [...this.state.units.values()]
-      .filter((candidate) => candidate.id !== unit.id)
-      .map<Position>((candidate) => ({ x: candidate.x, y: candidate.y }));
-
-    const validation = validateMove({
+    const validation = validateMovementAction({
       from: { x: unit.x, y: unit.y },
       to: { x: payload.x, y: payload.y },
       boardWidth: this.state.boardWidth,
       boardHeight: this.state.boardHeight,
-      blocked,
-      occupied,
-      maxDistance: GAME_CONFIG.phaseOne.moveDistance,
+      blocked: this.blockedPositions(),
+      occupied: this.occupiedPositions(unit.id),
+      maxDistance: unit.movementRange,
+      actionPointsAvailable: this.state.actionPointsRemaining,
+      actionPointCostPerTile: GAME_CONFIG.actions.movementCostPerTile,
     });
 
     if (!validation.ok) {
@@ -133,17 +132,79 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
     unit.x = payload.x;
     unit.y = payload.y;
-    this.state.movesRemaining -= 1;
+    this.state.actionPointsRemaining -= validation.cost;
     this.broadcast("action:accepted", {
       type: "move",
       unitId: unit.id,
       x: unit.x,
       y: unit.y,
+      apCost: validation.cost,
+      path: validation.path,
+    });
+    this.advanceIfOutOfActions();
+  }
+
+  private handleAttack(client: Client, payload: AttackMessage): void {
+    if (!this.canAct(client)) return;
+    if (
+      typeof payload.attackerId !== "string" ||
+      typeof payload.targetId !== "string"
+    ) {
+      return this.reject(client, "Invalid attack request.");
+    }
+
+    const attacker = this.state.units.get(payload.attackerId);
+    const target = this.state.units.get(payload.targetId);
+    if (!attacker || attacker.ownerId !== client.sessionId) {
+      return this.reject(client, "You do not control that attacker.");
+    }
+    if (!target) return this.reject(client, "Target not found.");
+
+    const validation = validateAttack({
+      attacker,
+      target,
+      tiles: this.attackTiles(),
+      actionPointsAvailable: this.state.actionPointsRemaining,
+      actionPointCost: GAME_CONFIG.actions.standardAttackCost,
+    });
+    if (!validation.ok) {
+      return this.reject(client, `Attack rejected: ${validation.reason}.`);
+    }
+
+    const outcome = applyDamage(target.hp, validation.damage);
+    target.hp = outcome.hp;
+    target.alive = outcome.alive;
+    this.state.actionPointsRemaining -= validation.cost;
+
+    this.broadcast("action:accepted", {
+      type: "attack",
+      attackerId: attacker.id,
+      targetId: target.id,
+      damage: validation.damage,
+      coverReduction: validation.coverReduction,
+      remainingHp: target.hp,
+      eliminated: !target.alive,
+      apCost: validation.cost,
     });
 
-    if (this.state.movesRemaining === 0) {
-      this.advanceTurn();
+    if (this.checkVictory(attacker.ownerId)) return;
+    this.advanceIfOutOfActions();
+  }
+
+  private canAct(client: Client): boolean {
+    if (this.state.status !== "playing") {
+      this.reject(client, "The match is not running.");
+      return false;
     }
+    if (this.state.activePlayerId !== client.sessionId) {
+      this.reject(client, "It is not your turn.");
+      return false;
+    }
+    if (this.state.actionPointsRemaining <= 0) {
+      this.reject(client, "No action points remain this turn.");
+      return false;
+    }
+    return true;
   }
 
   private handleEndTurn(client: Client): void {
@@ -158,30 +219,60 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
   private startMatch(): void {
     const players = this.orderedPlayers();
-    if (players.length !== GAME_CONFIG.room.maxPlayers) {
-      return;
-    }
+    if (players.length !== GAME_CONFIG.room.maxPlayers) return;
 
     this.state.units.clear();
     players.forEach((player) => {
-      const spawn = GAME_CONFIG.spawnPoints[player.slot];
-      if (!spawn) {
-        throw new Error(`Missing spawn point for player slot ${player.slot}.`);
-      }
-
-      const unit = new UnitState();
-      unit.id = `unit-${player.slot + 1}`;
-      unit.ownerId = player.id;
-      unit.x = spawn.x;
-      unit.y = spawn.y;
-      this.state.units.set(unit.id, unit);
+      UNIT_CLASS_ORDER.forEach((classId, classIndex) => {
+        const spawn = GAME_CONFIG.spawnPoints[player.slot]?.[classIndex];
+        if (!spawn) {
+          throw new Error(
+            `Missing spawn point for player ${player.slot}, unit ${classIndex}.`,
+          );
+        }
+        const definition = UNIT_DEFINITIONS[classId];
+        const unit = new UnitState();
+        unit.id = `${player.id}-${classId}`;
+        unit.ownerId = player.id;
+        unit.classId = definition.classId;
+        unit.name = definition.name;
+        unit.x = spawn.x;
+        unit.y = spawn.y;
+        unit.hp = definition.maxHp;
+        unit.maxHp = definition.maxHp;
+        unit.movementRange = definition.movementRange;
+        unit.attackRange = definition.attackRange;
+        unit.attackDamage = definition.attackDamage;
+        unit.alive = true;
+        this.state.units.set(unit.id, unit);
+      });
     });
 
     this.state.status = "playing";
     this.state.currentRound = 1;
     this.state.activePlayerId = players[0]!.id;
-    this.state.movesRemaining = GAME_CONFIG.phaseOne.movesPerTurn;
+    this.state.actionPointsRemaining =
+      GAME_CONFIG.actions.actionPointsPerTurn;
+    this.state.winnerId = "";
     this.lock();
+  }
+
+  private checkVictory(attackingPlayerId: string): boolean {
+    const opponentStillAlive = [...this.state.units.values()].some(
+      (unit) => unit.ownerId !== attackingPlayerId && unit.alive,
+    );
+    if (opponentStillAlive) return false;
+
+    this.state.status = "finished";
+    this.state.winnerId = attackingPlayerId;
+    this.state.activePlayerId = "";
+    this.state.actionPointsRemaining = 0;
+    this.broadcast("match:finished", { winnerId: attackingPlayerId });
+    return true;
+  }
+
+  private advanceIfOutOfActions(): void {
+    if (this.state.actionPointsRemaining === 0) this.advanceTurn();
   }
 
   private advanceTurn(): void {
@@ -198,7 +289,29 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     );
     this.state.activePlayerId = next.activePlayerId;
     this.state.currentRound = next.round;
-    this.state.movesRemaining = GAME_CONFIG.phaseOne.movesPerTurn;
+    this.state.actionPointsRemaining =
+      GAME_CONFIG.actions.actionPointsPerTurn;
+  }
+
+  private blockedPositions(): Position[] {
+    return [...this.state.tiles.values()]
+      .filter((tile) => !tile.walkable)
+      .map((tile) => ({ x: tile.x, y: tile.y }));
+  }
+
+  private occupiedPositions(exceptUnitId: string): Position[] {
+    return [...this.state.units.values()]
+      .filter((unit) => unit.alive && unit.id !== exceptUnitId)
+      .map((unit) => ({ x: unit.x, y: unit.y }));
+  }
+
+  private attackTiles(): AttackTile[] {
+    return [...this.state.tiles.values()].map((tile) => ({
+      x: tile.x,
+      y: tile.y,
+      blocksLineOfSight: tile.blocksLineOfSight,
+      coverValue: tile.coverValue,
+    }));
   }
 
   private orderedPlayers(): PlayerState[] {
@@ -210,9 +323,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
       [...this.state.players.values()].map((player) => player.slot),
     );
     for (let slot = 0; slot < GAME_CONFIG.room.maxPlayers; slot += 1) {
-      if (!occupiedSlots.has(slot)) {
-        return slot;
-      }
+      if (!occupiedSlots.has(slot)) return slot;
     }
     throw new Error("Room has no available player slot.");
   }
@@ -220,14 +331,9 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
   private removePlayer(playerId: string): void {
     this.state.players.delete(playerId);
     for (const [unitId, unit] of this.state.units.entries()) {
-      if (unit.ownerId === playerId) {
-        this.state.units.delete(unitId);
-      }
+      if (unit.ownerId === playerId) this.state.units.delete(unitId);
     }
-
-    if (this.state.status === "playing") {
-      this.resetToWaiting();
-    }
+    if (this.state.status !== "waiting") this.resetToWaiting();
   }
 
   private resetToWaiting(): void {
@@ -235,11 +341,10 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     this.state.status = "waiting";
     this.state.currentRound = 0;
     this.state.activePlayerId = "";
-    this.state.movesRemaining = 0;
+    this.state.actionPointsRemaining = 0;
+    this.state.winnerId = "";
     this.state.units.clear();
-    for (const player of this.state.players.values()) {
-      player.ready = false;
-    }
+    for (const player of this.state.players.values()) player.ready = false;
   }
 
   private reject(client: Client, message: string): void {

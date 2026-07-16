@@ -1,7 +1,19 @@
 import Phaser from "phaser";
-import { GAME_CONFIG, manhattanDistance } from "@tactics-lite/game-core";
-import { GameBridge } from "./GameBridge";
-import type { MatchSnapshot, UnitSnapshot } from "../multiplayer/types";
+import {
+  GAME_CONFIG,
+  findReachableTiles,
+  positionKey,
+  validateAttack,
+  type AttackTile,
+} from "@tactics-lite/game-core";
+import {
+  GameBridge,
+  type BoardInteractionContext,
+} from "./GameBridge";
+import type {
+  MatchSnapshot,
+  UnitSnapshot,
+} from "../multiplayer/types";
 
 const CANVAS_SIZE = 720;
 const BOARD_PADDING = 56;
@@ -11,7 +23,10 @@ export class BoardScene extends Phaser.Scene {
   private bridge: GameBridge;
   private snapshot?: MatchSnapshot;
   private localPlayerId = "";
-  private selectedUnitId = "";
+  private interaction: BoardInteractionContext = {
+    selectedUnitId: "",
+    actionMode: "move",
+  };
   private graphics?: Phaser.GameObjects.Graphics;
   private labels: Phaser.GameObjects.Text[] = [];
 
@@ -25,10 +40,11 @@ export class BoardScene extends Phaser.Scene {
     this.graphics = this.add.graphics();
     this.input.on("pointerup", this.handlePointer, this);
     this.bridge.on(GameBridge.SNAPSHOT, this.receiveSnapshot, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.renderBoard();
   }
 
-  shutdown(): void {
+  private shutdown(): void {
     this.bridge.off(GameBridge.SNAPSHOT, this.receiveSnapshot, this);
     this.input.off("pointerup", this.handlePointer, this);
   }
@@ -36,22 +52,16 @@ export class BoardScene extends Phaser.Scene {
   private receiveSnapshot(
     snapshot: MatchSnapshot,
     localPlayerId: string,
+    interaction: BoardInteractionContext,
   ): void {
-    const selectedUnit = snapshot.units.find(
-      (unit) => unit.id === this.selectedUnitId,
-    );
-    if (!selectedUnit || snapshot.activePlayerId !== localPlayerId) {
-      this.selectedUnitId = "";
-    }
     this.snapshot = snapshot;
     this.localPlayerId = localPlayerId;
+    this.interaction = interaction;
     this.renderBoard();
   }
 
   private handlePointer(pointer: Phaser.Input.Pointer): void {
-    if (!this.snapshot || this.snapshot.status !== "playing") {
-      return;
-    }
+    if (!this.snapshot) return;
 
     const x = Math.floor((pointer.x - BOARD_PADDING) / TILE_SIZE);
     const y = Math.floor((pointer.y - BOARD_PADDING) / TILE_SIZE);
@@ -65,81 +75,161 @@ export class BoardScene extends Phaser.Scene {
     }
 
     const clickedUnit = this.snapshot.units.find(
-      (unit) => unit.x === x && unit.y === y,
+      (unit) => unit.alive && unit.x === x && unit.y === y,
     );
-    if (clickedUnit?.ownerId === this.localPlayerId) {
-      this.selectedUnitId = clickedUnit.id;
-      this.renderBoard();
-      return;
-    }
-
-    if (this.selectedUnitId) {
-      this.bridge.selectTile({ x, y });
+    if (clickedUnit) {
+      this.bridge.select({ type: "unit", unitId: clickedUnit.id });
+    } else {
+      this.bridge.select({ type: "tile", x, y });
     }
   }
 
   private renderBoard(): void {
-    if (!this.graphics) {
-      return;
-    }
+    if (!this.graphics) return;
     this.graphics.clear();
     this.labels.forEach((label) => label.destroy());
     this.labels = [];
 
     this.drawBackdrop();
-    if (!this.snapshot) {
-      return;
-    }
+    if (!this.snapshot) return;
 
     const selectedUnit = this.snapshot.units.find(
-      (unit) => unit.id === this.selectedUnitId,
+      (unit) => unit.id === this.interaction.selectedUnitId && unit.alive,
     );
+    const reachable = this.reachableTileKeys(selectedUnit);
+    const validTargets = this.validAttackTargets(selectedUnit);
 
     for (const tile of this.snapshot.tiles) {
       const left = BOARD_PADDING + tile.x * TILE_SIZE;
       const top = BOARD_PADDING + tile.y * TILE_SIZE;
-      const isReachable = selectedUnit
-        ? this.isReachable(tile.x, tile.y, selectedUnit)
-        : false;
-      const color = tile.walkable ? 0x151f2f : 0x29364a;
+      const tileKey = positionKey(tile);
+      const isReachable = reachable.has(tileKey);
+      const color = tile.tileType === "floor" ? 0x151f2f : 0x29364a;
 
       this.graphics.fillStyle(isReachable ? 0x173f42 : color, 1);
-      this.graphics.fillRoundedRect(left + 3, top + 3, TILE_SIZE - 6, TILE_SIZE - 6, 8);
-      this.graphics.lineStyle(1, isReachable ? 0x47e5c1 : 0x2c3a50, 0.8);
-      this.graphics.strokeRoundedRect(left + 3, top + 3, TILE_SIZE - 6, TILE_SIZE - 6, 8);
+      this.graphics.fillRoundedRect(
+        left + 3,
+        top + 3,
+        TILE_SIZE - 6,
+        TILE_SIZE - 6,
+        8,
+      );
+      this.graphics.lineStyle(
+        isReachable ? 2 : 1,
+        isReachable ? 0x47e5c1 : 0x2c3a50,
+        0.85,
+      );
+      this.graphics.strokeRoundedRect(
+        left + 3,
+        top + 3,
+        TILE_SIZE - 6,
+        TILE_SIZE - 6,
+        8,
+      );
 
-      if (!tile.walkable) {
-        this.graphics.fillStyle(0x607089, 0.55);
-        this.graphics.fillRect(left + 20, top + 20, TILE_SIZE - 40, TILE_SIZE - 40);
-        this.graphics.lineStyle(2, 0x8190a5, 0.7);
-        this.graphics.lineBetween(left + 21, top + 21, left + TILE_SIZE - 21, top + TILE_SIZE - 21);
-        this.graphics.lineBetween(left + TILE_SIZE - 21, top + 21, left + 21, top + TILE_SIZE - 21);
+      if (tile.tileType === "obstacle") this.drawObstacle(left, top);
+      if (tile.tileType === "cover") this.drawCover(left, top);
+      if (isReachable) {
+        this.graphics.fillStyle(0x47e5c1, 0.75);
+        this.graphics.fillCircle(
+          left + TILE_SIZE / 2,
+          top + TILE_SIZE / 2,
+          4,
+        );
       }
     }
 
-    this.snapshot.units.forEach((unit) => this.drawUnit(unit));
+    this.snapshot.units
+      .filter((unit) => !unit.alive)
+      .forEach((unit) => this.drawEliminatedUnit(unit));
+    this.snapshot.units
+      .filter((unit) => unit.alive)
+      .forEach((unit) =>
+        this.drawUnit(unit, validTargets.has(unit.id)),
+      );
   }
 
   private drawBackdrop(): void {
     if (!this.graphics) return;
     this.graphics.fillStyle(0x0f1724, 1);
-    this.graphics.fillRoundedRect(24, 24, CANVAS_SIZE - 48, CANVAS_SIZE - 48, 24);
+    this.graphics.fillRoundedRect(
+      24,
+      24,
+      CANVAS_SIZE - 48,
+      CANVAS_SIZE - 48,
+      24,
+    );
     this.graphics.lineStyle(1, 0x23334b, 1);
-    this.graphics.strokeRoundedRect(24, 24, CANVAS_SIZE - 48, CANVAS_SIZE - 48, 24);
+    this.graphics.strokeRoundedRect(
+      24,
+      24,
+      CANVAS_SIZE - 48,
+      CANVAS_SIZE - 48,
+      24,
+    );
   }
 
-  private drawUnit(unit: UnitSnapshot): void {
+  private drawObstacle(left: number, top: number): void {
+    if (!this.graphics) return;
+    this.graphics.fillStyle(0x607089, 0.6);
+    this.graphics.fillRect(
+      left + 16,
+      top + 13,
+      TILE_SIZE - 32,
+      TILE_SIZE - 26,
+    );
+    this.graphics.lineStyle(2, 0x93a0b4, 0.7);
+    this.graphics.lineBetween(
+      left + 18,
+      top + 15,
+      left + TILE_SIZE - 18,
+      top + TILE_SIZE - 15,
+    );
+    this.graphics.lineBetween(
+      left + TILE_SIZE - 18,
+      top + 15,
+      left + 18,
+      top + TILE_SIZE - 15,
+    );
+  }
+
+  private drawCover(left: number, top: number): void {
+    if (!this.graphics) return;
+    this.graphics.fillStyle(0xa36f3e, 0.82);
+    this.graphics.fillRoundedRect(
+      left + 13,
+      top + TILE_SIZE * 0.47,
+      TILE_SIZE - 26,
+      TILE_SIZE * 0.3,
+      5,
+    );
+    this.graphics.lineStyle(2, 0xd09a5e, 0.7);
+    this.graphics.strokeRoundedRect(
+      left + 13,
+      top + TILE_SIZE * 0.47,
+      TILE_SIZE - 26,
+      TILE_SIZE * 0.3,
+      5,
+    );
+  }
+
+  private drawUnit(unit: UnitSnapshot, isValidTarget: boolean): void {
     if (!this.graphics || !this.snapshot) return;
-    const player = this.snapshot.players.find((candidate) => candidate.id === unit.ownerId);
+    const player = this.snapshot.players.find(
+      (candidate) => candidate.id === unit.ownerId,
+    );
     const isLocal = unit.ownerId === this.localPlayerId;
-    const isSelected = unit.id === this.selectedUnitId;
+    const isSelected = unit.id === this.interaction.selectedUnitId;
     const centerX = BOARD_PADDING + unit.x * TILE_SIZE + TILE_SIZE / 2;
     const centerY = BOARD_PADDING + unit.y * TILE_SIZE + TILE_SIZE / 2;
     const unitColor = player?.slot === 0 ? 0x47e5c1 : 0xff6b7a;
 
-    if (isSelected) {
+    if (isValidTarget) {
+      this.graphics.lineStyle(5, 0xffc45c, 0.95);
+      this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.39);
+    } else if (isSelected) {
       this.graphics.lineStyle(4, 0xffffff, 0.95);
-      this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.35);
+      this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.36);
     }
     this.graphics.fillStyle(unitColor, 0.18);
     this.graphics.fillCircle(centerX, centerY, TILE_SIZE * 0.34);
@@ -148,32 +238,115 @@ export class BoardScene extends Phaser.Scene {
     this.graphics.lineStyle(3, isLocal ? 0xeafffa : 0x2a1015, 0.9);
     this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.24);
 
+    const hpRatio = unit.hp / unit.maxHp;
+    this.graphics.fillStyle(0x0a0f18, 0.95);
+    this.graphics.fillRoundedRect(
+      centerX - TILE_SIZE * 0.3,
+      centerY + TILE_SIZE * 0.29,
+      TILE_SIZE * 0.6,
+      7,
+      3,
+    );
+    this.graphics.fillStyle(hpRatio > 0.4 ? 0x73e0a1 : 0xff6b7a, 1);
+    this.graphics.fillRoundedRect(
+      centerX - TILE_SIZE * 0.3 + 1,
+      centerY + TILE_SIZE * 0.29 + 1,
+      (TILE_SIZE * 0.6 - 2) * hpRatio,
+      5,
+      2,
+    );
+
     const label = this.add
-      .text(centerX, centerY, player?.displayName.slice(0, 2).toUpperCase() ?? "?", {
+      .text(centerX, centerY - 1, unit.name.slice(0, 1), {
         color: player?.slot === 0 ? "#071b18" : "#28080d",
         fontFamily: "Inter, system-ui, sans-serif",
-        fontSize: "18px",
+        fontSize: "20px",
         fontStyle: "bold",
       })
       .setOrigin(0.5);
     this.labels.push(label);
   }
 
-  private isReachable(x: number, y: number, unit: UnitSnapshot): boolean {
-    if (!this.snapshot || this.snapshot.activePlayerId !== this.localPlayerId) {
-      return false;
+  private drawEliminatedUnit(unit: UnitSnapshot): void {
+    if (!this.graphics) return;
+    const centerX = BOARD_PADDING + unit.x * TILE_SIZE + TILE_SIZE / 2;
+    const centerY = BOARD_PADDING + unit.y * TILE_SIZE + TILE_SIZE / 2;
+    this.graphics.lineStyle(4, 0x7d8798, 0.28);
+    this.graphics.lineBetween(
+      centerX - 12,
+      centerY - 12,
+      centerX + 12,
+      centerY + 12,
+    );
+    this.graphics.lineBetween(
+      centerX + 12,
+      centerY - 12,
+      centerX - 12,
+      centerY + 12,
+    );
+  }
+
+  private reachableTileKeys(selectedUnit?: UnitSnapshot): Set<string> {
+    if (
+      !this.snapshot ||
+      !selectedUnit ||
+      selectedUnit.ownerId !== this.localPlayerId ||
+      this.snapshot.activePlayerId !== this.localPlayerId ||
+      this.interaction.actionMode !== "move"
+    ) {
+      return new Set();
     }
-    const tile = this.snapshot.tiles.find(
-      (candidate) => candidate.x === x && candidate.y === y,
+
+    const blocked = this.snapshot.tiles
+      .filter((tile) => !tile.walkable)
+      .map((tile) => ({ x: tile.x, y: tile.y }));
+    const occupied = this.snapshot.units
+      .filter((unit) => unit.alive && unit.id !== selectedUnit.id)
+      .map((unit) => ({ x: unit.x, y: unit.y }));
+    return new Set(
+      findReachableTiles(
+        selectedUnit,
+        this.snapshot.boardWidth,
+        this.snapshot.boardHeight,
+        blocked,
+        occupied,
+        selectedUnit.movementRange,
+        this.snapshot.actionPointsRemaining,
+        GAME_CONFIG.actions.movementCostPerTile,
+      ).map(positionKey),
     );
-    const occupied = this.snapshot.units.some(
-      (candidate) => candidate.x === x && candidate.y === y,
-    );
-    return Boolean(
-      tile?.walkable &&
-        !occupied &&
-        manhattanDistance(unit, { x, y }) <= GAME_CONFIG.phaseOne.moveDistance,
+  }
+
+  private validAttackTargets(selectedUnit?: UnitSnapshot): Set<string> {
+    if (
+      !this.snapshot ||
+      !selectedUnit ||
+      selectedUnit.ownerId !== this.localPlayerId ||
+      this.snapshot.activePlayerId !== this.localPlayerId ||
+      this.interaction.actionMode !== "attack"
+    ) {
+      return new Set();
+    }
+    const tiles: AttackTile[] = this.snapshot.tiles.map((tile) => ({
+      x: tile.x,
+      y: tile.y,
+      blocksLineOfSight: tile.blocksLineOfSight,
+      coverValue: tile.coverValue,
+    }));
+    return new Set(
+      this.snapshot.units
+        .filter(
+          (unit) =>
+            unit.ownerId !== this.localPlayerId &&
+            validateAttack({
+              attacker: selectedUnit,
+              target: unit,
+              tiles,
+              actionPointsAvailable: this.snapshot!.actionPointsRemaining,
+              actionPointCost: GAME_CONFIG.actions.standardAttackCost,
+            }).ok,
+        )
+        .map((unit) => unit.id),
     );
   }
 }
-
