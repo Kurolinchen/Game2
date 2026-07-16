@@ -1,26 +1,58 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import type { TileSelection } from "./game/GameBridge";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { GAME_CONFIG } from "@tactics-lite/game-core";
+import type {
+  ActionMode,
+  BoardSelection,
+} from "./game/GameBridge";
 import {
   createTacticsRoom,
   joinTacticsRoom,
   type TacticsRoomConnection,
 } from "./multiplayer/client";
 import { toMatchSnapshot } from "./multiplayer/snapshot";
-import type { MatchSnapshot, NetworkMatchState } from "./multiplayer/types";
+import type {
+  MatchSnapshot,
+  NetworkMatchState,
+  UnitSnapshot,
+} from "./multiplayer/types";
 
-type ConnectionStatus = "idle" | "connecting" | "connected" | "disconnected";
+type ConnectionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "disconnected";
 
 const Board = lazy(() =>
   import("./game/Board").then((module) => ({ default: module.Board })),
 );
-
-const initialRoomCode = new URLSearchParams(window.location.search)
-  .get("room")
-  ?.toUpperCase() ?? "";
+const initialRoomCode =
+  new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "The room could not be reached.";
+}
+
+function actionNotice(payload: {
+  type?: string;
+  damage?: number;
+  eliminated?: boolean;
+  apCost?: number;
+}): string {
+  if (payload.type === "attack") {
+    return payload.eliminated
+      ? `Target eliminated · ${payload.damage ?? 0} damage`
+      : `${payload.damage ?? 0} damage dealt`;
+  }
+  if (payload.type === "move") return `Moved · ${payload.apCost ?? 0} AP`;
+  return "Action confirmed.";
 }
 
 export default function App() {
@@ -33,6 +65,8 @@ export default function App() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [selectedUnitId, setSelectedUnitId] = useState("");
+  const [actionMode, setActionMode] = useState<ActionMode>("move");
 
   const localPlayerId = room?.sessionId ?? "";
   const localPlayer = snapshot?.players.find(
@@ -41,7 +75,11 @@ export default function App() {
   const activePlayer = snapshot?.players.find(
     (player) => player.id === snapshot.activePlayerId,
   );
+  const selectedUnit = snapshot?.units.find(
+    (unit) => unit.id === selectedUnitId,
+  );
   const isMyTurn = snapshot?.activePlayerId === localPlayerId;
+  const didWin = snapshot?.winnerId === localPlayerId;
 
   const attachRoom = useCallback((nextRoom: TacticsRoomConnection) => {
     setRoom(nextRoom);
@@ -49,6 +87,7 @@ export default function App() {
     setError("");
     setNotice("");
     setRoomCode(nextRoom.roomId);
+    setSnapshot(toMatchSnapshot(nextRoom.state));
     window.history.replaceState({}, "", `?room=${nextRoom.roomId}`);
 
     nextRoom.onStateChange((state: NetworkMatchState) => {
@@ -57,9 +96,20 @@ export default function App() {
     nextRoom.onMessage("action:error", (payload: { message?: string }) => {
       setError(payload.message ?? "The server rejected that action.");
     });
-    nextRoom.onMessage("action:accepted", () => {
-      setError("");
-    });
+    nextRoom.onMessage(
+      "action:accepted",
+      (payload: {
+        type?: string;
+        damage?: number;
+        eliminated?: boolean;
+        apCost?: number;
+      }) => {
+        setError("");
+        setNotice(actionNotice(payload));
+        window.setTimeout(() => setNotice(""), 1400);
+      },
+    );
+    nextRoom.onMessage("match:finished", () => setSelectedUnitId(""));
     nextRoom.onLeave(() => {
       setStatus("disconnected");
       setNotice("Connection closed. Return to the lobby to start again.");
@@ -69,13 +119,9 @@ export default function App() {
   const connect = useCallback(
     async (mode: "create" | "join") => {
       const cleanName = displayName.trim();
-      if (!cleanName) {
-        setError("Enter a display name first.");
-        return;
-      }
+      if (!cleanName) return setError("Enter a display name first.");
       if (mode === "join" && roomCode.trim().length !== 6) {
-        setError("Enter the six-character room code.");
-        return;
+        return setError("Enter the six-character room code.");
       }
 
       setStatus("connecting");
@@ -96,11 +142,10 @@ export default function App() {
   );
 
   const leaveRoom = useCallback(async () => {
-    if (room) {
-      await room.leave(true);
-    }
+    if (room) await room.leave(true);
     setRoom(undefined);
     setSnapshot(undefined);
+    setSelectedUnitId("");
     setStatus("idle");
     setError("");
     setNotice("");
@@ -111,22 +156,64 @@ export default function App() {
     if (!snapshot?.roomCode) return;
     const url = new URL(window.location.href);
     url.searchParams.set("room", snapshot.roomCode);
-    await navigator.clipboard.writeText(url.toString());
-    setNotice("Invite link copied.");
-    window.setTimeout(() => setNotice(""), 1800);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setNotice("Invite link copied.");
+      window.setTimeout(() => setNotice(""), 1800);
+    } catch {
+      setError(`Copy this room code: ${snapshot.roomCode}`);
+    }
   }, [snapshot?.roomCode]);
 
-  const handleTileSelected = useCallback(
-    ({ x, y }: TileSelection) => {
-      if (!room || !snapshot || !isMyTurn) return;
-      const ownUnit = snapshot.units.find(
-        (unit) => unit.ownerId === localPlayerId,
-      );
-      if (!ownUnit) return;
-      room.send("move", { unitId: ownUnit.id, x, y });
+  const handleBoardSelection = useCallback(
+    (selection: BoardSelection) => {
+      if (!room || !snapshot || snapshot.status !== "playing") return;
+
+      if (selection.type === "unit") {
+        const clickedUnit = snapshot.units.find(
+          (unit) => unit.id === selection.unitId,
+        );
+        if (!clickedUnit?.alive) return;
+
+        if (clickedUnit.ownerId === localPlayerId) {
+          setSelectedUnitId(clickedUnit.id);
+          setError("");
+          return;
+        }
+
+        if (isMyTurn && actionMode === "attack" && selectedUnit?.alive) {
+          room.send("attack", {
+            attackerId: selectedUnit.id,
+            targetId: clickedUnit.id,
+          });
+        }
+        return;
+      }
+
+      if (isMyTurn && actionMode === "move" && selectedUnit?.alive) {
+        room.send("move", {
+          unitId: selectedUnit.id,
+          x: selection.x,
+          y: selection.y,
+        });
+      }
     },
-    [isMyTurn, localPlayerId, room, snapshot],
+    [actionMode, isMyTurn, localPlayerId, room, selectedUnit, snapshot],
   );
+
+  useEffect(() => {
+    if (!snapshot || snapshot.status !== "playing") return;
+    const currentSelection = snapshot.units.find(
+      (unit) => unit.id === selectedUnitId,
+    );
+    if (currentSelection?.alive && currentSelection.ownerId === localPlayerId) {
+      return;
+    }
+    const firstLivingUnit = snapshot.units.find(
+      (unit) => unit.ownerId === localPlayerId && unit.alive,
+    );
+    setSelectedUnitId(firstLivingUnit?.id ?? "");
+  }, [localPlayerId, selectedUnitId, snapshot]);
 
   useEffect(() => {
     return () => {
@@ -135,16 +222,20 @@ export default function App() {
   }, [room]);
 
   const playerCount = snapshot?.players.length ?? 0;
-  const waitingForOpponent = playerCount < 2;
   const subtitle = useMemo(() => {
     if (!snapshot) return "Small grid. Sharp decisions.";
     if (snapshot.status === "waiting") {
-      return waitingForOpponent
+      return playerCount < 2
         ? "Waiting for a second tactician."
         : "Both players must lock in.";
     }
-    return isMyTurn ? "Your move." : `${activePlayer?.displayName ?? "Opponent"} is moving.`;
-  }, [activePlayer?.displayName, isMyTurn, snapshot, waitingForOpponent]);
+    if (snapshot.status === "finished") {
+      return didWin ? "Warehouse secured." : "Your squad was eliminated.";
+    }
+    return isMyTurn
+      ? "Spend six points. Break their formation."
+      : `${activePlayer?.displayName ?? "Opponent"} is moving.`;
+  }, [activePlayer?.displayName, didWin, isMyTurn, playerCount, snapshot]);
 
   return (
     <main className="app-shell">
@@ -156,7 +247,7 @@ export default function App() {
           <span className="brand-mark">TL</span>
           <span>
             <strong>Tactics Lite</strong>
-            <small>Phase 01 · Proof of Concept</small>
+            <small>Phase 02 · Playable Core</small>
           </span>
         </a>
         <span className={`connection connection-${status}`}>
@@ -165,197 +256,404 @@ export default function App() {
       </header>
 
       {!room ? (
-        <section className="landing-grid">
-          <div className="hero-copy">
-            <span className="eyebrow">Browser tactics · 1 versus 1</span>
-            <h1>Every tile should change the plan.</h1>
-            <p>
-              Create a private room, share the code, and test the first
-              server-authoritative movement loop for Tactics Lite.
-            </p>
-            <div className="feature-strip">
-              <span>8 × 8 grid</span>
-              <span>2 players</span>
-              <span>Zero dice rolls</span>
-            </div>
-          </div>
-
-          <div className="lobby-card panel">
-            <div className="panel-heading">
-              <span className="step-number">01</span>
-              <div>
-                <h2>Enter the operation</h2>
-                <p>No account required.</p>
-              </div>
-            </div>
-
-            <label>
-              Display name
-              <input
-                autoFocus
-                maxLength={24}
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Your callsign"
-                disabled={status === "connecting"}
-              />
-            </label>
-
-            <button
-              className="primary-button"
-              onClick={() => void connect("create")}
-              disabled={status === "connecting"}
-            >
-              <span>Create private room</span>
-              <b>↗</b>
-            </button>
-
-            <div className="divider"><span>or join by code</span></div>
-
-            <div className="join-row">
-              <input
-                className="code-input"
-                maxLength={6}
-                value={roomCode}
-                onChange={(event) =>
-                  setRoomCode(event.target.value.replace(/[^a-z0-9]/gi, "").toUpperCase())
-                }
-                placeholder="ABC123"
-                aria-label="Room code"
-                disabled={status === "connecting"}
-              />
-              <button
-                className="secondary-button"
-                onClick={() => void connect("join")}
-                disabled={status === "connecting"}
-              >
-                Join
-              </button>
-            </div>
-            {error && <p className="message error-message">{error}</p>}
-          </div>
-        </section>
+        <Landing
+          displayName={displayName}
+          roomCode={roomCode}
+          status={status}
+          error={error}
+          onDisplayName={setDisplayName}
+          onRoomCode={setRoomCode}
+          onConnect={connect}
+        />
       ) : (
         <section className="room-layout">
           <div className="room-heading">
             <div>
-              <span className="eyebrow">Warehouse · Room {snapshot?.roomCode ?? room.roomId}</span>
+              <span className="eyebrow">
+                Warehouse · Room {snapshot?.roomCode ?? room.roomId}
+              </span>
               <h1>{subtitle}</h1>
             </div>
             <div className="room-actions">
               <button className="ghost-button" onClick={() => void copyInvite()}>
                 Copy invite
               </button>
-              <button className="ghost-button danger" onClick={() => void leaveRoom()}>
+              <button
+                className="ghost-button danger"
+                onClick={() => void leaveRoom()}
+              >
                 Leave
               </button>
             </div>
           </div>
 
-          {snapshot && snapshot.status === "playing" ? (
+          {snapshot && snapshot.status !== "waiting" ? (
             <div className="match-grid">
               <div className="board-panel panel">
-                <Suspense fallback={<div className="board-loading">Initializing tactical grid…</div>}>
+                <Suspense
+                  fallback={
+                    <div className="board-loading">
+                      Initializing tactical grid…
+                    </div>
+                  }
+                >
                   <Board
                     snapshot={snapshot}
                     localPlayerId={localPlayerId}
-                    onTileSelected={handleTileSelected}
+                    selectedUnitId={selectedUnitId}
+                    actionMode={actionMode}
+                    onSelection={handleBoardSelection}
                   />
                 </Suspense>
               </div>
-              <aside className="match-sidebar">
-                <div className="panel turn-panel">
-                  <span className="eyebrow">Round {snapshot.currentRound}</span>
-                  <h2>{isMyTurn ? "Your turn" : "Opponent's turn"}</h2>
-                  <p>
-                    {isMyTurn
-                      ? "Select your unit, then choose one highlighted tile."
-                      : `Waiting for ${activePlayer?.displayName ?? "the opponent"}.`}
-                  </p>
-                  <div className="move-counter">
-                    <span>Moves remaining</span>
-                    <strong>{snapshot.movesRemaining}</strong>
-                  </div>
-                  <button
-                    className="secondary-button full-width"
-                    disabled={!isMyTurn}
-                    onClick={() => room.send("end_turn")}
-                  >
-                    End turn
-                  </button>
-                </div>
-
-                <div className="panel roster-panel">
-                  <span className="eyebrow">Tactical link</span>
-                  {snapshot.players.map((player) => (
-                    <div className="roster-entry" key={player.id}>
-                      <i className={`player-swatch player-${player.slot}`} />
-                      <div>
-                        <strong>{player.displayName}</strong>
-                        <small>{player.id === localPlayerId ? "You" : "Opponent"}</small>
-                      </div>
-                      {snapshot.activePlayerId === player.id && <span className="active-tag">Active</span>}
-                    </div>
-                  ))}
-                </div>
-              </aside>
+              <MatchSidebar
+                snapshot={snapshot}
+                localPlayerId={localPlayerId}
+                selectedUnit={selectedUnit}
+                actionMode={actionMode}
+                isMyTurn={isMyTurn}
+                didWin={didWin}
+                onActionMode={setActionMode}
+                onSelectUnit={setSelectedUnitId}
+                onEndTurn={() => room.send("end_turn")}
+                onLeave={() => void leaveRoom()}
+              />
             </div>
           ) : (
-            <div className="waiting-grid">
-              <div className="panel briefing-panel">
-                <span className="eyebrow">Ready check</span>
-                <h2>Secure both seats.</h2>
-                <p>
-                  Share the code below. The synchronized board deploys as soon as
-                  both players are ready.
-                </p>
-                <button className="room-code" onClick={() => void copyInvite()}>
-                  <span>{snapshot?.roomCode ?? room.roomId}</span>
-                  <small>Click to copy invite link</small>
-                </button>
-              </div>
-
-              <div className="player-slots">
-                {[0, 1].map((slot) => {
-                  const player = snapshot?.players.find((candidate) => candidate.slot === slot);
-                  return (
-                    <div className={`panel player-slot player-slot-${slot}`} key={slot}>
-                      <span className="slot-label">Player {slot + 1}</span>
-                      {player ? (
-                        <>
-                          <div className="player-orb">{player.displayName.slice(0, 2).toUpperCase()}</div>
-                          <h3>{player.displayName}</h3>
-                          <span className={player.ready ? "ready-state ready" : "ready-state"}>
-                            {player.ready ? "Ready" : "Standing by"}
-                          </span>
-                          {player.id === localPlayerId && (
-                            <button
-                              className={player.ready ? "secondary-button full-width" : "primary-button full-width"}
-                              onClick={() => room.send("ready")}
-                            >
-                              {player.ready ? "Cancel ready" : "I'm ready"}
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <div className="player-orb empty">··</div>
-                          <h3>Open seat</h3>
-                          <span className="ready-state">Awaiting connection</span>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <WaitingRoom
+              snapshot={snapshot}
+              roomId={room.roomId}
+              localPlayerId={localPlayerId}
+              onCopy={copyInvite}
+              onReady={() => room.send("ready")}
+            />
           )}
 
           {(error || notice) && (
-            <p className={`toast ${error ? "toast-error" : ""}`}>{error || notice}</p>
+            <p className={`toast ${error ? "toast-error" : ""}`}>
+              {error || notice}
+            </p>
           )}
         </section>
       )}
     </main>
+  );
+}
+
+interface LandingProps {
+  displayName: string;
+  roomCode: string;
+  status: ConnectionStatus;
+  error: string;
+  onDisplayName(value: string): void;
+  onRoomCode(value: string): void;
+  onConnect(mode: "create" | "join"): Promise<void>;
+}
+
+function Landing(props: LandingProps) {
+  return (
+    <section className="landing-grid">
+      <div className="hero-copy">
+        <span className="eyebrow">Browser tactics · 1 versus 1</span>
+        <h1>Six units. Six points. No wasted moves.</h1>
+        <p>
+          Position a Breacher, Sniper, and Trickster through deterministic
+          firefights on a compact warehouse grid.
+        </p>
+        <div className="feature-strip">
+          <span>3 units each</span>
+          <span>6 AP turns</span>
+          <span>Deterministic combat</span>
+        </div>
+      </div>
+
+      <div className="lobby-card panel">
+        <div className="panel-heading">
+          <span className="step-number">02</span>
+          <div>
+            <h2>Enter the operation</h2>
+            <p>No account required.</p>
+          </div>
+        </div>
+        <label>
+          Display name
+          <input
+            autoFocus
+            maxLength={24}
+            value={props.displayName}
+            onChange={(event) => props.onDisplayName(event.target.value)}
+            placeholder="Your callsign"
+            disabled={props.status === "connecting"}
+          />
+        </label>
+        <button
+          className="primary-button"
+          onClick={() => void props.onConnect("create")}
+          disabled={props.status === "connecting"}
+        >
+          <span>Create private room</span>
+          <b>↗</b>
+        </button>
+        <div className="divider">
+          <span>or join by code</span>
+        </div>
+        <div className="join-row">
+          <input
+            className="code-input"
+            maxLength={6}
+            value={props.roomCode}
+            onChange={(event) =>
+              props.onRoomCode(
+                event.target.value.replace(/[^a-z0-9]/gi, "").toUpperCase(),
+              )
+            }
+            placeholder="ABC123"
+            aria-label="Room code"
+            disabled={props.status === "connecting"}
+          />
+          <button
+            className="secondary-button"
+            onClick={() => void props.onConnect("join")}
+            disabled={props.status === "connecting"}
+          >
+            Join
+          </button>
+        </div>
+        {props.error && (
+          <p className="message error-message">{props.error}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+interface WaitingRoomProps {
+  snapshot?: MatchSnapshot;
+  roomId: string;
+  localPlayerId: string;
+  onCopy(): Promise<void>;
+  onReady(): void;
+}
+
+function WaitingRoom(props: WaitingRoomProps) {
+  return (
+    <div className="waiting-grid">
+      <div className="panel briefing-panel">
+        <span className="eyebrow">Ready check</span>
+        <h2>Deploy both squads.</h2>
+        <p>
+          Each player receives a Breacher, Sniper, and Trickster. Eliminate all
+          three opposing units to win.
+        </p>
+        <button className="room-code" onClick={() => void props.onCopy()}>
+          <span>{props.snapshot?.roomCode ?? props.roomId}</span>
+          <small>Click to copy invite link</small>
+        </button>
+      </div>
+
+      <div className="player-slots">
+        {[0, 1].map((slot) => {
+          const player = props.snapshot?.players.find(
+            (candidate) => candidate.slot === slot,
+          );
+          return (
+            <div className={`panel player-slot player-slot-${slot}`} key={slot}>
+              <span className="slot-label">Player {slot + 1}</span>
+              {player ? (
+                <>
+                  <div className="player-orb">
+                    {player.displayName.slice(0, 2).toUpperCase()}
+                  </div>
+                  <h3>{player.displayName}</h3>
+                  <span
+                    className={
+                      player.ready ? "ready-state ready" : "ready-state"
+                    }
+                  >
+                    {player.ready ? "Ready" : "Standing by"}
+                  </span>
+                  {player.id === props.localPlayerId && (
+                    <button
+                      className={
+                        player.ready
+                          ? "secondary-button full-width"
+                          : "primary-button full-width"
+                      }
+                      onClick={props.onReady}
+                    >
+                      {player.ready ? "Cancel ready" : "I'm ready"}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="player-orb empty">··</div>
+                  <h3>Open seat</h3>
+                  <span className="ready-state">Awaiting connection</span>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+interface MatchSidebarProps {
+  snapshot: MatchSnapshot;
+  localPlayerId: string;
+  selectedUnit?: UnitSnapshot;
+  actionMode: ActionMode;
+  isMyTurn: boolean;
+  didWin: boolean;
+  onActionMode(mode: ActionMode): void;
+  onSelectUnit(unitId: string): void;
+  onEndTurn(): void;
+  onLeave(): void;
+}
+
+function MatchSidebar(props: MatchSidebarProps) {
+  if (props.snapshot.status === "finished") {
+    const winner = props.snapshot.players.find(
+      (player) => player.id === props.snapshot.winnerId,
+    );
+    return (
+      <aside className="match-sidebar">
+        <div className={`panel result-panel ${props.didWin ? "victory" : "defeat"}`}>
+          <span className="eyebrow">Match complete</span>
+          <div className="result-icon">{props.didWin ? "V" : "×"}</div>
+          <h2>{props.didWin ? "Victory" : "Defeat"}</h2>
+          <p>{winner?.displayName ?? "The opposing squad"} secured the Warehouse.</p>
+          <button className="secondary-button full-width" onClick={props.onLeave}>
+            Return to lobby
+          </button>
+        </div>
+        <SquadPanel {...props} />
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="match-sidebar">
+      <div className="panel turn-panel">
+        <div className="turn-heading-row">
+          <span className="eyebrow">Round {props.snapshot.currentRound}</span>
+          <span className={props.isMyTurn ? "turn-live" : "turn-wait"}>
+            {props.isMyTurn ? "Your turn" : "Opponent"}
+          </span>
+        </div>
+        <div className="ap-display">
+          <strong>{props.snapshot.actionPointsRemaining}</strong>
+          <div>
+            <span>Action points</span>
+            <div className="ap-pips">
+              {Array.from(
+                { length: GAME_CONFIG.actions.actionPointsPerTurn },
+                (_, index) => (
+                  <i
+                    className={
+                      index < props.snapshot.actionPointsRemaining ? "filled" : ""
+                    }
+                    key={index}
+                  />
+                ),
+              )}
+            </div>
+          </div>
+        </div>
+
+        {props.selectedUnit ? (
+          <div className="unit-card">
+            <div className="unit-card-heading">
+              <span className={`class-badge ${props.selectedUnit.classId}`}>
+                {props.selectedUnit.name.slice(0, 1)}
+              </span>
+              <div>
+                <h2>{props.selectedUnit.name}</h2>
+                <small>{props.selectedUnit.classId}</small>
+              </div>
+              <strong>
+                {props.selectedUnit.hp}/{props.selectedUnit.maxHp} HP
+              </strong>
+            </div>
+            <div className="unit-hp-track">
+              <i
+                style={{
+                  width: `${(props.selectedUnit.hp / props.selectedUnit.maxHp) * 100}%`,
+                }}
+              />
+            </div>
+            <div className="unit-stats">
+              <span>Move <b>{props.selectedUnit.movementRange}</b></span>
+              <span>Range <b>{props.selectedUnit.attackRange}</b></span>
+              <span>Damage <b>{props.selectedUnit.attackDamage}</b></span>
+            </div>
+          </div>
+        ) : (
+          <p className="empty-selection">Select one of your living units.</p>
+        )}
+
+        <div className="action-buttons">
+          <button
+            className={props.actionMode === "move" ? "action-button active" : "action-button"}
+            disabled={!props.isMyTurn || !props.selectedUnit?.alive}
+            onClick={() => props.onActionMode("move")}
+          >
+            <b>Move</b>
+            <small>1 AP / tile</small>
+          </button>
+          <button
+            className={props.actionMode === "attack" ? "action-button active attack" : "action-button attack"}
+            disabled={
+              !props.isMyTurn ||
+              !props.selectedUnit?.alive ||
+              props.snapshot.actionPointsRemaining <
+                GAME_CONFIG.actions.standardAttackCost
+            }
+            onClick={() => props.onActionMode("attack")}
+          >
+            <b>Attack</b>
+            <small>{GAME_CONFIG.actions.standardAttackCost} AP</small>
+          </button>
+        </div>
+        <button
+          className="secondary-button full-width"
+          disabled={!props.isMyTurn}
+          onClick={props.onEndTurn}
+        >
+          End turn
+        </button>
+      </div>
+      <SquadPanel {...props} />
+    </aside>
+  );
+}
+
+function SquadPanel(props: MatchSidebarProps) {
+  const ownUnits = props.snapshot.units.filter(
+    (unit) => unit.ownerId === props.localPlayerId,
+  );
+  return (
+    <div className="panel roster-panel">
+      <span className="eyebrow">Your squad</span>
+      {ownUnits.map((unit) => (
+        <button
+          className={`squad-entry ${
+            props.selectedUnit?.id === unit.id ? "selected" : ""
+          } ${!unit.alive ? "eliminated" : ""}`}
+          key={unit.id}
+          onClick={() => unit.alive && props.onSelectUnit(unit.id)}
+          disabled={!unit.alive}
+        >
+          <i className={`class-dot ${unit.classId}`} />
+          <span>
+            <strong>{unit.name}</strong>
+            <small>{unit.hp}/{unit.maxHp} HP</small>
+          </span>
+          <b>{unit.alive ? "›" : "OUT"}</b>
+        </button>
+      ))}
+    </div>
   );
 }

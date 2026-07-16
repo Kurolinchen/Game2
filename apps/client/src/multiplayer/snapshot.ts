@@ -18,8 +18,16 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
     units.push({
       id: unit.id,
       ownerId: unit.ownerId,
+      classId: unit.classId,
+      name: unit.name,
       x: unit.x,
       y: unit.y,
+      hp: unit.hp,
+      maxHp: unit.maxHp,
+      movementRange: unit.movementRange,
+      attackRange: unit.attackRange,
+      attackDamage: unit.attackDamage,
+      alive: unit.alive,
     });
   });
   state.tiles.forEach((tile) => {
@@ -29,6 +37,7 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
       tileType: tile.tileType,
       walkable: tile.walkable,
       blocksLineOfSight: tile.blocksLineOfSight,
+      coverValue: tile.coverValue,
     });
   });
 
@@ -37,12 +46,12 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
     status: state.status,
     currentRound: state.currentRound,
     activePlayerId: state.activePlayerId,
-    movesRemaining: state.movesRemaining,
+    actionPointsRemaining: state.actionPointsRemaining,
     boardWidth: state.boardWidth,
     boardHeight: state.boardHeight,
     players: players.sort((a, b) => a.slot - b.slot),
     units,
     tiles,
+    winnerId: state.winnerId,
   };
 }
-
