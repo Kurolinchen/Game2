@@ -1,0 +1,24 @@
+{
+  "name": "@tactics-lite/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@colyseus/schema": "4.0.27",
+    "@tactics-lite/game-core": "0.1.0",
+    "colyseus": "0.17.10"
+  },
+  "devDependencies": {
+    "tsx": "4.23.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}
+
