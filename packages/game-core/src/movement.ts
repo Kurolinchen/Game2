@@ -138,6 +138,7 @@ export function validateMovementAction(
     maxDistance,
     actionPointsAvailable,
     actionPointCostPerTile,
+    actionPointDiscount = 0,
   } = request;
 
   if (!isIntegerPosition(to)) {
@@ -163,7 +164,10 @@ export function validateMovementAction(
     return { ok: false, reason: "movement-range" };
   }
 
-  const cost = path.length * actionPointCostPerTile;
+  const cost = Math.max(
+    0,
+    path.length * actionPointCostPerTile - Math.max(0, actionPointDiscount),
+  );
   if (cost > actionPointsAvailable) {
     return { ok: false, reason: "insufficient-ap" };
   }
@@ -179,10 +183,14 @@ export function findReachableTiles(
   maxDistance: number,
   actionPointsAvailable: number,
   actionPointCostPerTile: number,
+  actionPointDiscount = 0,
 ): Position[] {
   const effectiveRange = Math.min(
     maxDistance,
-    Math.floor(actionPointsAvailable / actionPointCostPerTile),
+    Math.floor(
+      (actionPointsAvailable + Math.max(0, actionPointDiscount)) /
+        actionPointCostPerTile,
+    ),
   );
   const reachable: Position[] = [];
 

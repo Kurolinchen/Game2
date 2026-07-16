@@ -1,7 +1,8 @@
 import Phaser from "phaser";
+import type { AbilityId } from "@tactics-lite/game-core";
 import type { MatchSnapshot } from "../multiplayer/types";
 
-export type ActionMode = "move" | "attack";
+export type ActionMode = "move" | "attack" | AbilityId;
 
 export interface BoardInteractionContext {
   selectedUnitId: string;

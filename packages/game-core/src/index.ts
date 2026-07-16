@@ -1,9 +1,12 @@
 export {
+  ABILITY_DEFINITIONS,
+  CLASS_ABILITIES,
   GAME_CONFIG,
   UNIT_CLASS_ORDER,
   UNIT_DEFINITIONS,
   createWarehouseTiles,
 } from "./config.js";
+export { calculateLongShotBaseDamage, resolvePush } from "./abilities.js";
 export {
   findReachableTiles,
   findShortestPath,
@@ -14,6 +17,7 @@ export {
 } from "./movement.js";
 export {
   applyDamage,
+  calculateModifiedDamage,
   getCoverReduction,
   hasLineOfSight,
   lineBetween,
@@ -21,7 +25,11 @@ export {
 } from "./combat.js";
 export { nextTurn } from "./turn.js";
 export type {
+  AbilityDefinition,
+  AbilityId,
+  AbilityTargetType,
   BoardTile,
+  DamageCalculation,
   AttackRejection,
   AttackRequest,
   AttackTile,
@@ -31,6 +39,8 @@ export type {
   MoveRequest,
   MoveValidation,
   Position,
+  PushRequest,
+  PushResult,
   TileType,
   TurnResult,
   MovementActionRejection,

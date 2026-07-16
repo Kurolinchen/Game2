@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyDamage,
+  calculateModifiedDamage,
   getCoverReduction,
   hasLineOfSight,
   lineBetween,
@@ -114,5 +115,19 @@ describe("deterministic standard attack", () => {
 
   it("clamps lethal damage at zero HP", () => {
     expect(applyDamage(2, 3)).toEqual({ hp: 0, alive: false });
+  });
+
+  it("adds Sniper damage at distance four or more", () => {
+    expect(calculateModifiedDamage(3, 4, "sniper", "trickster")).toMatchObject({
+      damage: 4,
+      sniperBonus: 1,
+    });
+  });
+
+  it("reduces adjacent damage against a Breacher but keeps one damage", () => {
+    expect(calculateModifiedDamage(1, 1, "trickster", "breacher")).toMatchObject({
+      damage: 1,
+      breacherReduction: 1,
+    });
   });
 });

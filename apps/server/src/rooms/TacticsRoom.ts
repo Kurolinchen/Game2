@@ -1,14 +1,24 @@
 import { Client, Room } from "colyseus";
 import {
+  ABILITY_DEFINITIONS,
+  CLASS_ABILITIES,
   GAME_CONFIG,
   UNIT_CLASS_ORDER,
   UNIT_DEFINITIONS,
   applyDamage,
+  calculateLongShotBaseDamage,
+  calculateModifiedDamage,
   createWarehouseTiles,
+  getCoverReduction,
+  hasLineOfSight,
+  manhattanDistance,
   nextTurn,
+  resolvePush,
   validateAttack,
   validateMovementAction,
   type AttackTile,
+  type AbilityDefinition,
+  type AbilityId,
   type Position,
 } from "@tactics-lite/game-core";
 import { sanitizeDisplayName } from "./displayName.js";
@@ -37,6 +47,19 @@ interface AttackMessage {
   targetId?: unknown;
 }
 
+interface AbilityMessage {
+  unitId?: unknown;
+  abilityId?: unknown;
+  targetUnitId?: unknown;
+  x?: unknown;
+  y?: unknown;
+}
+
+interface AbilityOutcome {
+  event: Record<string, unknown>;
+  checkVictory?: boolean;
+}
+
 export class TacticsRoom extends Room<{ state: MatchState }> {
   state = new MatchState();
   maxClients = GAME_CONFIG.room.maxPlayers;
@@ -47,6 +70,8 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
       this.handleMove(client, payload),
     attack: (client: Client, payload: AttackMessage) =>
       this.handleAttack(client, payload),
+    ability: (client: Client, payload: AbilityMessage) =>
+      this.handleAbility(client, payload),
     end_turn: (client: Client) => this.handleEndTurn(client),
   };
 
@@ -110,7 +135,12 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     }
 
     const unit = this.state.units.get(payload.unitId);
-    if (!unit || unit.ownerId !== client.sessionId || !unit.alive) {
+    if (
+      !unit ||
+      unit.ownerId !== client.sessionId ||
+      !unit.alive ||
+      unit.isDecoy
+    ) {
       return this.reject(client, "You do not control that active unit.");
     }
 
@@ -124,6 +154,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
       maxDistance: unit.movementRange,
       actionPointsAvailable: this.state.actionPointsRemaining,
       actionPointCostPerTile: GAME_CONFIG.actions.movementCostPerTile,
+      actionPointDiscount: unit.movementDiscountAvailable ? 1 : 0,
     });
 
     if (!validation.ok) {
@@ -132,6 +163,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
     unit.x = payload.x;
     unit.y = payload.y;
+    if (unit.movementDiscountAvailable) unit.movementDiscountAvailable = false;
     this.state.actionPointsRemaining -= validation.cost;
     this.broadcast("action:accepted", {
       type: "move",
@@ -141,6 +173,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
       apCost: validation.cost,
       path: validation.path,
     });
+    if (this.resolveOverwatch(unit, validation.path)) return;
     this.advanceIfOutOfActions();
   }
 
@@ -155,7 +188,11 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
     const attacker = this.state.units.get(payload.attackerId);
     const target = this.state.units.get(payload.targetId);
-    if (!attacker || attacker.ownerId !== client.sessionId) {
+    if (
+      !attacker ||
+      attacker.ownerId !== client.sessionId ||
+      attacker.isDecoy
+    ) {
       return this.reject(client, "You do not control that attacker.");
     }
     if (!target) return this.reject(client, "Target not found.");
@@ -189,6 +226,351 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
     if (this.checkVictory(attacker.ownerId)) return;
     this.advanceIfOutOfActions();
+  }
+
+  private handleAbility(client: Client, payload: AbilityMessage): void {
+    if (!this.canAct(client)) return;
+    if (
+      typeof payload.unitId !== "string" ||
+      typeof payload.abilityId !== "string" ||
+      !(payload.abilityId in ABILITY_DEFINITIONS)
+    ) {
+      return this.reject(client, "Invalid ability request.");
+    }
+
+    const unit = this.state.units.get(payload.unitId);
+    const ability = ABILITY_DEFINITIONS[payload.abilityId as AbilityId];
+    if (
+      !unit ||
+      unit.ownerId !== client.sessionId ||
+      !unit.alive ||
+      unit.isDecoy
+    ) {
+      return this.reject(client, "You do not control that active unit.");
+    }
+    if (unit.classId !== ability.classId) {
+      return this.reject(client, `${unit.name} cannot use ${ability.name}.`);
+    }
+    if ((unit.cooldowns.get(ability.id) ?? 0) > 0) {
+      return this.reject(client, `${ability.name} is on cooldown.`);
+    }
+    if (this.state.actionPointsRemaining < ability.actionPointCost) {
+      return this.reject(client, `Not enough AP for ${ability.name}.`);
+    }
+
+    const outcome = this.resolveAbility(client, unit, ability, payload);
+    if (!outcome) return;
+
+    this.state.actionPointsRemaining -= ability.actionPointCost;
+    unit.cooldowns.set(ability.id, ability.cooldown);
+    this.broadcast("action:accepted", {
+      type: "ability",
+      unitId: unit.id,
+      abilityId: ability.id,
+      abilityName: ability.name,
+      apCost: ability.actionPointCost,
+      ...outcome.event,
+    });
+
+    if (outcome.checkVictory && this.checkVictory(unit.ownerId)) return;
+    this.advanceIfOutOfActions();
+  }
+
+  private resolveAbility(
+    client: Client,
+    unit: UnitState,
+    ability: AbilityDefinition,
+    payload: AbilityMessage,
+  ): AbilityOutcome | null {
+    switch (ability.id) {
+      case "kinetic-push":
+        return this.useKineticPush(client, unit, payload);
+      case "breach":
+        return this.useBreach(client, unit, payload);
+      case "long-shot":
+        return this.useLongShot(client, unit, payload);
+      case "overwatch":
+        unit.overwatchActive = true;
+        unit.overwatchExpiresRound = this.state.currentRound + 1;
+        return { event: { active: true } };
+      case "swap":
+        return this.useSwap(client, unit, payload);
+      case "decoy":
+        return this.useDecoy(client, unit, payload);
+    }
+  }
+
+  private useKineticPush(
+    client: Client,
+    unit: UnitState,
+    payload: AbilityMessage,
+  ): AbilityOutcome | null {
+    const target = this.targetUnit(client, payload.targetUnitId);
+    if (!target) return null;
+    if (target.ownerId === unit.ownerId) {
+      this.reject(client, "Kinetic Push requires an enemy target.");
+      return null;
+    }
+
+    const push = resolvePush({
+      attacker: unit,
+      target,
+      boardWidth: this.state.boardWidth,
+      boardHeight: this.state.boardHeight,
+      blocked: this.blockedPositions(),
+      occupied: this.occupiedPositions(target.id).filter(
+        (position) => position.x !== unit.x || position.y !== unit.y,
+      ),
+    });
+    if (!push) {
+      this.reject(client, "Kinetic Push requires an adjacent enemy.");
+      return null;
+    }
+
+    const baseDamage =
+      GAME_CONFIG.actions.pushDamage +
+      (push.collided ? GAME_CONFIG.actions.pushCollisionDamage : 0);
+    const damage = calculateModifiedDamage(
+      baseDamage,
+      1,
+      "breacher",
+      this.combatClass(target),
+    ).damage;
+    target.x = push.destination.x;
+    target.y = push.destination.y;
+    this.damageUnit(target, damage);
+    return {
+      event: {
+        targetId: target.id,
+        x: target.x,
+        y: target.y,
+        collided: push.collided,
+        damage,
+        remainingHp: target.hp,
+        eliminated: !target.alive,
+      },
+      checkVictory: true,
+    };
+  }
+
+  private useBreach(
+    client: Client,
+    unit: UnitState,
+    payload: AbilityMessage,
+  ): AbilityOutcome | null {
+    const position = this.targetPosition(client, payload);
+    if (!position) return null;
+    if (manhattanDistance(unit, position) !== 1) {
+      this.reject(client, "Breach requires adjacent low cover.");
+      return null;
+    }
+    const tile = [...this.state.tiles.values()].find(
+      (candidate) => candidate.x === position.x && candidate.y === position.y,
+    );
+    if (!tile || tile.tileType !== "cover") {
+      this.reject(client, "Breach can only destroy low cover.");
+      return null;
+    }
+    tile.tileType = "floor";
+    tile.walkable = true;
+    tile.blocksLineOfSight = false;
+    tile.coverValue = 0;
+    return { event: { x: tile.x, y: tile.y, destroyedCover: true } };
+  }
+
+  private useLongShot(
+    client: Client,
+    unit: UnitState,
+    payload: AbilityMessage,
+  ): AbilityOutcome | null {
+    const target = this.targetUnit(client, payload.targetUnitId);
+    if (!target) return null;
+    if (target.ownerId === unit.ownerId) {
+      this.reject(client, "Long Shot requires an enemy target.");
+      return null;
+    }
+    const distance = manhattanDistance(unit, target);
+    if (distance > ABILITY_DEFINITIONS["long-shot"].range) {
+      this.reject(client, "Long Shot target is out of range.");
+      return null;
+    }
+    if (!hasLineOfSight(unit, target, this.attackTiles())) {
+      this.reject(client, "Long Shot is blocked by an obstacle.");
+      return null;
+    }
+    const coverReduction = getCoverReduction(unit, target, this.attackTiles());
+    const calculation = calculateModifiedDamage(
+      calculateLongShotBaseDamage(distance),
+      distance,
+      "sniper",
+      this.combatClass(target),
+      coverReduction,
+    );
+    this.damageUnit(target, calculation.damage);
+    return {
+      event: {
+        targetId: target.id,
+        distance,
+        damage: calculation.damage,
+        coverReduction,
+        remainingHp: target.hp,
+        eliminated: !target.alive,
+      },
+      checkVictory: true,
+    };
+  }
+
+  private useSwap(
+    client: Client,
+    unit: UnitState,
+    payload: AbilityMessage,
+  ): AbilityOutcome | null {
+    const target = this.targetUnit(client, payload.targetUnitId);
+    if (!target) return null;
+    if (target.id === unit.id || manhattanDistance(unit, target) > 4) {
+      this.reject(client, "Swap requires another living unit within 4 tiles.");
+      return null;
+    }
+    const origin = { x: unit.x, y: unit.y };
+    unit.x = target.x;
+    unit.y = target.y;
+    target.x = origin.x;
+    target.y = origin.y;
+    return {
+      event: {
+        targetId: target.id,
+        unitPosition: { x: unit.x, y: unit.y },
+        targetPosition: { x: target.x, y: target.y },
+      },
+    };
+  }
+
+  private useDecoy(
+    client: Client,
+    unit: UnitState,
+    payload: AbilityMessage,
+  ): AbilityOutcome | null {
+    const position = this.targetPosition(client, payload);
+    if (!position) return null;
+    if (manhattanDistance(unit, position) > 3) {
+      this.reject(client, "Decoy target is out of range.");
+      return null;
+    }
+    const tile = [...this.state.tiles.values()].find(
+      (candidate) => candidate.x === position.x && candidate.y === position.y,
+    );
+    const occupied = this.occupiedPositions("").some(
+      (candidate) => candidate.x === position.x && candidate.y === position.y,
+    );
+    if (
+      !tile ||
+      !tile.walkable ||
+      occupied ||
+      !hasLineOfSight(unit, position, this.attackTiles())
+    ) {
+      this.reject(client, "Decoy requires a free visible floor tile.");
+      return null;
+    }
+
+    for (const [id, candidate] of this.state.units.entries()) {
+      if (candidate.isDecoy && candidate.ownerId === unit.ownerId) {
+        this.state.units.delete(id);
+      }
+    }
+    const decoy = new UnitState();
+    decoy.id = `${unit.ownerId}-decoy`;
+    decoy.ownerId = unit.ownerId;
+    decoy.classId = "decoy";
+    decoy.name = "Decoy";
+    decoy.x = position.x;
+    decoy.y = position.y;
+    decoy.hp = GAME_CONFIG.actions.decoyHp;
+    decoy.maxHp = GAME_CONFIG.actions.decoyHp;
+    decoy.alive = true;
+    decoy.isDecoy = true;
+    decoy.sourceUnitId = unit.id;
+    this.state.units.set(decoy.id, decoy);
+    return { event: { decoyId: decoy.id, x: decoy.x, y: decoy.y } };
+  }
+
+  private resolveOverwatch(mover: UnitState, path: Position[]): boolean {
+    const watcher = [...this.state.units.values()].find(
+      (candidate) =>
+        candidate.ownerId !== mover.ownerId &&
+        candidate.classId === "sniper" &&
+        candidate.alive &&
+        candidate.overwatchActive &&
+        path.some(
+          (position) =>
+            manhattanDistance(candidate, position) <= candidate.attackRange &&
+            hasLineOfSight(candidate, position, this.attackTiles()),
+        ),
+    );
+    if (!watcher) return false;
+
+    watcher.overwatchActive = false;
+    const distance = manhattanDistance(watcher, mover);
+    const coverReduction = getCoverReduction(watcher, mover, this.attackTiles());
+    const damage = calculateModifiedDamage(
+      GAME_CONFIG.actions.overwatchDamage,
+      distance,
+      "sniper",
+      this.combatClass(mover),
+      coverReduction,
+    ).damage;
+    this.damageUnit(mover, damage);
+    this.broadcast("action:accepted", {
+      type: "overwatch",
+      unitId: watcher.id,
+      targetId: mover.id,
+      damage,
+      remainingHp: mover.hp,
+      eliminated: !mover.alive,
+    });
+    return !mover.alive && this.checkVictory(watcher.ownerId);
+  }
+
+  private targetUnit(client: Client, value: unknown): UnitState | null {
+    if (typeof value !== "string") {
+      this.reject(client, "A target unit is required.");
+      return null;
+    }
+    const target = this.state.units.get(value);
+    if (!target || !target.alive) {
+      this.reject(client, "Target unit is not alive.");
+      return null;
+    }
+    return target;
+  }
+
+  private targetPosition(
+    client: Client,
+    payload: AbilityMessage,
+  ): Position | null {
+    if (
+      typeof payload.x !== "number" ||
+      typeof payload.y !== "number" ||
+      !Number.isInteger(payload.x) ||
+      !Number.isInteger(payload.y)
+    ) {
+      this.reject(client, "A valid target tile is required.");
+      return null;
+    }
+    return { x: payload.x, y: payload.y };
+  }
+
+  private damageUnit(target: UnitState, damage: number): void {
+    const outcome = applyDamage(target.hp, damage);
+    target.hp = outcome.hp;
+    target.alive = outcome.alive;
+  }
+
+  private combatClass(unit: UnitState): "breacher" | "sniper" | "trickster" | undefined {
+    return unit.classId === "breacher" ||
+      unit.classId === "sniper" ||
+      unit.classId === "trickster"
+      ? unit.classId
+      : undefined;
   }
 
   private canAct(client: Client): boolean {
@@ -244,6 +626,10 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
         unit.attackRange = definition.attackRange;
         unit.attackDamage = definition.attackDamage;
         unit.alive = true;
+        unit.movementDiscountAvailable = classId === "trickster";
+        for (const abilityId of CLASS_ABILITIES[classId]) {
+          unit.cooldowns.set(abilityId, 0);
+        }
         this.state.units.set(unit.id, unit);
       });
     });
@@ -259,7 +645,8 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
   private checkVictory(attackingPlayerId: string): boolean {
     const opponentStillAlive = [...this.state.units.values()].some(
-      (unit) => unit.ownerId !== attackingPlayerId && unit.alive,
+      (unit) =>
+        unit.ownerId !== attackingPlayerId && unit.alive && !unit.isDecoy,
     );
     if (opponentStillAlive) return false;
 
@@ -291,6 +678,23 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     this.state.currentRound = next.round;
     this.state.actionPointsRemaining =
       GAME_CONFIG.actions.actionPointsPerTurn;
+    this.preparePlayerTurn(next.activePlayerId);
+  }
+
+  private preparePlayerTurn(playerId: string): void {
+    for (const unit of this.state.units.values()) {
+      if (unit.ownerId !== playerId || unit.isDecoy) continue;
+      for (const [abilityId, remaining] of unit.cooldowns.entries()) {
+        unit.cooldowns.set(abilityId, Math.max(0, remaining - 1));
+      }
+      unit.movementDiscountAvailable = unit.classId === "trickster";
+      if (
+        unit.overwatchActive &&
+        unit.overwatchExpiresRound <= this.state.currentRound
+      ) {
+        unit.overwatchActive = false;
+      }
+    }
   }
 
   private blockedPositions(): Position[] {

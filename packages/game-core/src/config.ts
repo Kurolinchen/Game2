@@ -1,4 +1,11 @@
-import type { BoardTile, Position, UnitDefinition } from "./types.js";
+import type {
+  AbilityDefinition,
+  AbilityId,
+  BoardTile,
+  Position,
+  UnitClassId,
+  UnitDefinition,
+} from "./types.js";
 
 export const UNIT_DEFINITIONS = {
   breacher: {
@@ -32,6 +39,75 @@ export const UNIT_DEFINITIONS = {
 
 export const UNIT_CLASS_ORDER = ["breacher", "sniper", "trickster"] as const;
 
+export const ABILITY_DEFINITIONS = {
+  "kinetic-push": {
+    id: "kinetic-push",
+    classId: "breacher",
+    name: "Kinetic Push",
+    description: "Deal 1 damage and push an adjacent enemy. A collision adds 2 damage.",
+    targetType: "enemy",
+    actionPointCost: 2,
+    range: 1,
+    cooldown: 2,
+  },
+  breach: {
+    id: "breach",
+    classId: "breacher",
+    name: "Breach",
+    description: "Destroy one adjacent low-cover tile.",
+    targetType: "cover",
+    actionPointCost: 2,
+    range: 1,
+    cooldown: 1,
+  },
+  "long-shot": {
+    id: "long-shot",
+    classId: "sniper",
+    name: "Long Shot",
+    description: "Fire up to 7 tiles. Damage scales with distance, up to 5 before modifiers.",
+    targetType: "enemy",
+    actionPointCost: 3,
+    range: 7,
+    cooldown: 2,
+  },
+  overwatch: {
+    id: "overwatch",
+    classId: "sniper",
+    name: "Overwatch",
+    description: "Fire once at the next enemy that moves into sight before your next turn.",
+    targetType: "self",
+    actionPointCost: 3,
+    range: 6,
+    cooldown: 2,
+  },
+  swap: {
+    id: "swap",
+    classId: "trickster",
+    name: "Swap",
+    description: "Exchange positions with any living unit within 4 tiles.",
+    targetType: "unit",
+    actionPointCost: 2,
+    range: 4,
+    cooldown: 2,
+  },
+  decoy: {
+    id: "decoy",
+    classId: "trickster",
+    name: "Decoy",
+    description: "Place a 2 HP decoy on a free visible tile within 3 tiles.",
+    targetType: "tile",
+    actionPointCost: 2,
+    range: 3,
+    cooldown: 2,
+  },
+} as const satisfies Record<AbilityId, AbilityDefinition>;
+
+export const CLASS_ABILITIES = {
+  breacher: ["kinetic-push", "breach"],
+  sniper: ["long-shot", "overwatch"],
+  trickster: ["swap", "decoy"],
+} as const satisfies Record<UnitClassId, readonly AbilityId[]>;
+
 export const GAME_CONFIG = {
   room: {
     maxPlayers: 2,
@@ -49,6 +125,10 @@ export const GAME_CONFIG = {
     actionPointsPerTurn: 6,
     movementCostPerTile: 1,
     standardAttackCost: 2,
+    pushDamage: 1,
+    pushCollisionDamage: 2,
+    overwatchDamage: 2,
+    decoyHp: 2,
   },
   spawnPoints: [
     [

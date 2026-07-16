@@ -22,6 +22,12 @@ export class UnitState extends Schema {
   @type("number") attackRange = 0;
   @type("number") attackDamage = 0;
   @type("boolean") alive = true;
+  @type("boolean") isDecoy = false;
+  @type("string") sourceUnitId = "";
+  @type("boolean") movementDiscountAvailable = false;
+  @type("boolean") overwatchActive = false;
+  @type("number") overwatchExpiresRound = 0;
+  @type({ map: "number" }) cooldowns = new MapSchema<number>();
 }
 
 export class TileState extends Schema {

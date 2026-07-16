@@ -6,7 +6,12 @@ import {
   useMemo,
   useState,
 } from "react";
-import { GAME_CONFIG } from "@tactics-lite/game-core";
+import {
+  ABILITY_DEFINITIONS,
+  CLASS_ABILITIES,
+  GAME_CONFIG,
+  type UnitClassId,
+} from "@tactics-lite/game-core";
 import type {
   ActionMode,
   BoardSelection,
@@ -45,6 +50,7 @@ function actionNotice(payload: {
   damage?: number;
   eliminated?: boolean;
   apCost?: number;
+  abilityName?: string;
 }): string {
   if (payload.type === "attack") {
     return payload.eliminated
@@ -52,6 +58,12 @@ function actionNotice(payload: {
       : `${payload.damage ?? 0} damage dealt`;
   }
   if (payload.type === "move") return `Moved · ${payload.apCost ?? 0} AP`;
+  if (payload.type === "ability") {
+    return `${payload.abilityName ?? "Ability"} · ${payload.apCost ?? 0} AP`;
+  }
+  if (payload.type === "overwatch") {
+    return `Overwatch hit · ${payload.damage ?? 0} damage`;
+  }
   return "Action confirmed.";
 }
 
@@ -103,6 +115,7 @@ export default function App() {
         damage?: number;
         eliminated?: boolean;
         apCost?: number;
+        abilityName?: string;
       }) => {
         setError("");
         setNotice(actionNotice(payload));
@@ -175,7 +188,28 @@ export default function App() {
         );
         if (!clickedUnit?.alive) return;
 
-        if (clickedUnit.ownerId === localPlayerId) {
+        const ability =
+          actionMode !== "move" && actionMode !== "attack"
+            ? ABILITY_DEFINITIONS[actionMode]
+            : undefined;
+        if (
+          isMyTurn &&
+          ability &&
+          selectedUnit?.alive &&
+          clickedUnit.id !== selectedUnit.id &&
+          (ability.targetType === "unit" ||
+            (ability.targetType === "enemy" &&
+              clickedUnit.ownerId !== localPlayerId))
+        ) {
+          room.send("ability", {
+            unitId: selectedUnit.id,
+            abilityId: ability.id,
+            targetUnitId: clickedUnit.id,
+          });
+          return;
+        }
+
+        if (clickedUnit.ownerId === localPlayerId && !clickedUnit.isDecoy) {
           setSelectedUnitId(clickedUnit.id);
           setError("");
           return;
@@ -196,6 +230,19 @@ export default function App() {
           x: selection.x,
           y: selection.y,
         });
+        return;
+      }
+      if (
+        isMyTurn &&
+        selectedUnit?.alive &&
+        (actionMode === "breach" || actionMode === "decoy")
+      ) {
+        room.send("ability", {
+          unitId: selectedUnit.id,
+          abilityId: actionMode,
+          x: selection.x,
+          y: selection.y,
+        });
       }
     },
     [actionMode, isMyTurn, localPlayerId, room, selectedUnit, snapshot],
@@ -206,14 +253,47 @@ export default function App() {
     const currentSelection = snapshot.units.find(
       (unit) => unit.id === selectedUnitId,
     );
-    if (currentSelection?.alive && currentSelection.ownerId === localPlayerId) {
+    if (
+      currentSelection?.alive &&
+      currentSelection.ownerId === localPlayerId &&
+      !currentSelection.isDecoy
+    ) {
       return;
     }
     const firstLivingUnit = snapshot.units.find(
-      (unit) => unit.ownerId === localPlayerId && unit.alive,
+      (unit) => unit.ownerId === localPlayerId && unit.alive && !unit.isDecoy,
     );
     setSelectedUnitId(firstLivingUnit?.id ?? "");
   }, [localPlayerId, selectedUnitId, snapshot]);
+
+  const handleActionMode = useCallback(
+    (mode: ActionMode) => {
+      if (
+        room &&
+        selectedUnit?.alive &&
+        mode !== "move" &&
+        mode !== "attack" &&
+        ABILITY_DEFINITIONS[mode].targetType === "self"
+      ) {
+        room.send("ability", { unitId: selectedUnit.id, abilityId: mode });
+        return;
+      }
+      setActionMode(mode);
+    },
+    [room, selectedUnit],
+  );
+
+  useEffect(() => {
+    if (actionMode === "move" || actionMode === "attack") return;
+    const ability = ABILITY_DEFINITIONS[actionMode];
+    if (
+      !selectedUnit ||
+      selectedUnit.classId !== ability.classId ||
+      (selectedUnit.cooldowns[actionMode] ?? 0) > 0
+    ) {
+      setActionMode("move");
+    }
+  }, [actionMode, selectedUnit]);
 
   useEffect(() => {
     return () => {
@@ -247,7 +327,7 @@ export default function App() {
           <span className="brand-mark">TL</span>
           <span>
             <strong>Tactics Lite</strong>
-            <small>Phase 02 · Playable Core</small>
+            <small>Phase 03 · Signature Abilities</small>
           </span>
         </a>
         <span className={`connection connection-${status}`}>
@@ -313,7 +393,7 @@ export default function App() {
                 actionMode={actionMode}
                 isMyTurn={isMyTurn}
                 didWin={didWin}
-                onActionMode={setActionMode}
+                onActionMode={handleActionMode}
                 onSelectUnit={setSelectedUnitId}
                 onEndTurn={() => room.send("end_turn")}
                 onLeave={() => void leaveRoom()}
@@ -616,7 +696,41 @@ function MatchSidebar(props: MatchSidebarProps) {
             <b>Attack</b>
             <small>{GAME_CONFIG.actions.standardAttackCost} AP</small>
           </button>
+          {props.selectedUnit &&
+            isCombatClass(props.selectedUnit.classId) &&
+            CLASS_ABILITIES[props.selectedUnit.classId].map((abilityId) => {
+              const ability = ABILITY_DEFINITIONS[abilityId];
+              const cooldown = props.selectedUnit?.cooldowns[abilityId] ?? 0;
+              const unavailable =
+                !props.isMyTurn ||
+                !props.selectedUnit?.alive ||
+                cooldown > 0 ||
+                props.snapshot.actionPointsRemaining < ability.actionPointCost;
+              return (
+                <button
+                  className={
+                    props.actionMode === abilityId
+                      ? "action-button ability active"
+                      : "action-button ability"
+                  }
+                  disabled={unavailable}
+                  onClick={() => props.onActionMode(abilityId)}
+                  title={ability.description}
+                  key={abilityId}
+                >
+                  <b>{ability.name}</b>
+                  <small>
+                    {cooldown > 0
+                      ? `Cooldown ${cooldown}`
+                      : `${ability.actionPointCost} AP · R${ability.range}`}
+                  </small>
+                </button>
+              );
+            })}
         </div>
+        {props.selectedUnit && isCombatClass(props.selectedUnit.classId) && (
+          <p className="passive-note">{passiveText(props.selectedUnit.classId)}</p>
+        )}
         <button
           className="secondary-button full-width"
           disabled={!props.isMyTurn}
@@ -632,7 +746,7 @@ function MatchSidebar(props: MatchSidebarProps) {
 
 function SquadPanel(props: MatchSidebarProps) {
   const ownUnits = props.snapshot.units.filter(
-    (unit) => unit.ownerId === props.localPlayerId,
+    (unit) => unit.ownerId === props.localPlayerId && !unit.isDecoy,
   );
   return (
     <div className="panel roster-panel">
@@ -656,4 +770,20 @@ function SquadPanel(props: MatchSidebarProps) {
       ))}
     </div>
   );
+}
+
+function isCombatClass(classId: string): classId is UnitClassId {
+  return (
+    classId === "breacher" || classId === "sniper" || classId === "trickster"
+  );
+}
+
+function passiveText(classId: UnitClassId): string {
+  if (classId === "breacher") {
+    return "Passive · Takes 1 less damage from adjacent attackers.";
+  }
+  if (classId === "sniper") {
+    return "Passive · Deals +1 damage at distance 4 or more.";
+  }
+  return "Passive · First movement each turn costs 1 AP less.";
 }

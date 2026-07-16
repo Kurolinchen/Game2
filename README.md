@@ -2,7 +2,7 @@
 
 The playable core of a compact, server-authoritative browser tactics game. Two players join a private room and command three synchronized units each through deterministic, AP-driven combat.
 
-## Phases 1–2 include
+## Phases 1–3 include
 
 - room creation with a shareable six-character code and URL
 - exactly two players with display names and a ready check
@@ -11,6 +11,9 @@ The playable core of a compact, server-authoritative browser tactics game. Two p
 - a shared six-action-point pool with path-based movement costs
 - server-authoritative pathfinding, collisions, attacks, sight lines, and low cover
 - HP, elimination, victory detection, turn switching, and round counting
+- six class abilities: Kinetic Push, Breach, Long Shot, Overwatch, Swap, and Decoy
+- synchronized per-unit cooldowns and distinct Breacher, Sniper, and Trickster passives
+- ability target previews, cooldown feedback, reaction shots, and destructible low cover
 - React lobby/UI, Phaser board renderer, Colyseus server
 - deterministic rule tests and a GitHub Actions build
 
@@ -31,10 +34,10 @@ The client uses `http://localhost:2567` by default. Copy `.env.example` to `.env
 
 ```bash
 npm run dev        # client and server
-npm run test       # 30 deterministic core and server utility tests
+npm run test       # 36 deterministic core and server utility tests
 npm run typecheck  # all workspaces
 npm run build      # production builds
-npm run smoke:multiplayer # plays a complete two-client elimination match
+npm run smoke:multiplayer # exercises all abilities, then completes a two-client match
 ```
 
 ## Repository layout
@@ -46,10 +49,9 @@ npm run smoke:multiplayer # plays a complete two-client elimination match
 
 No database or account system is required for this proof of concept. Rooms live in server memory and disappear when empty.
 
-## Known Phase 2 limitations
+## Known Phase 3 limitations
 
 - Room state is in memory; restarting the server removes active rooms.
 - A disconnect returns a running match to the waiting state. Token-based reconnect is reserved for the later polish phase.
-- The three classes have distinct base stats, but their active and passive abilities begin in Phase 3.
 - Team selection, rematch, reconnect tokens, sound, and final action animations remain later-phase work.
 - Phaser is lazy-loaded only when a match starts, but its isolated production chunk is still about 1.2 MB before gzip.

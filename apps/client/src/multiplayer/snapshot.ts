@@ -15,6 +15,10 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
     });
   });
   state.units.forEach((unit) => {
+    const cooldowns: Record<string, number> = {};
+    unit.cooldowns.forEach((remaining, abilityId) => {
+      cooldowns[abilityId] = remaining;
+    });
     units.push({
       id: unit.id,
       ownerId: unit.ownerId,
@@ -28,6 +32,12 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
       attackRange: unit.attackRange,
       attackDamage: unit.attackDamage,
       alive: unit.alive,
+      isDecoy: unit.isDecoy,
+      sourceUnitId: unit.sourceUnitId,
+      movementDiscountAvailable: unit.movementDiscountAvailable,
+      overwatchActive: unit.overwatchActive,
+      overwatchExpiresRound: unit.overwatchExpiresRound,
+      cooldowns,
     });
   });
   state.tiles.forEach((tile) => {
