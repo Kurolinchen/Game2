@@ -41,10 +41,15 @@ async function tilePosition(canvas, x, y) {
 }
 
 async function observedActionState(page, canvas) {
+  const [apValues, errors, lastPointer] = await Promise.all([
+    page.locator(".ap-number").allTextContents(),
+    page.locator(".toast-error").allTextContents(),
+    canvas.getAttribute("data-last-pointer-tile"),
+  ]);
   return {
-    ap: await page.locator(".ap-number").textContent().catch(() => null),
-    error: await page.locator(".toast-error").textContent().catch(() => null),
-    lastPointer: await canvas.getAttribute("data-last-pointer-tile"),
+    ap: apValues[0] ?? null,
+    error: errors[0] ?? null,
+    lastPointer,
   };
 }
 
