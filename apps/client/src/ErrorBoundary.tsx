@@ -6,16 +6,17 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   failed: boolean;
+  message: string;
 }
 
 export class ErrorBoundary extends Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
 > {
-  state: ErrorBoundaryState = { failed: false };
+  state: ErrorBoundaryState = { failed: false, message: "" };
 
-  static getDerivedStateFromError(): ErrorBoundaryState {
-    return { failed: true };
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { failed: true, message: error.message };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
@@ -27,7 +28,10 @@ export class ErrorBoundary extends Component<
 
     return (
       <main className="fatal-error-shell">
-        <section className="panel fatal-error-card">
+        <section
+          className="panel fatal-error-card"
+          data-error-message={this.state.message}
+        >
           <span className="fatal-error-icon">!</span>
           <span className="eyebrow">Interface recovery</span>
           <h1>The tactical display stopped responding.</h1>

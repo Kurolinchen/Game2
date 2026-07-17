@@ -51,6 +51,9 @@ async function observedActionState(page) {
       boardReady: canvas?.getAttribute("data-board-ready") ?? null,
       connection: document.querySelector(".connection")?.textContent?.trim() ?? null,
       fatalError: document.querySelector(".fatal-error-card h1")?.textContent ?? null,
+      fatalMessage:
+        document.querySelector(".fatal-error-card")?.getAttribute("data-error-message") ??
+        null,
     };
   });
 }
@@ -77,6 +80,7 @@ test("starts a visible CPU match, moves, and reconnects after reload", async ({
     boardReady: "true",
     connection: "Live room",
     fatalError: null,
+    fatalMessage: null,
   });
 
   await page.reload();
@@ -114,6 +118,7 @@ test("touch input previews an action before the second tap confirms it", async (
       boardReady: "true",
       connection: "Live room",
       fatalError: null,
+      fatalMessage: null,
     });
     await page.getByRole("button", { name: "Leave" }).click();
   } finally {
