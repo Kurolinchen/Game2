@@ -7,16 +7,17 @@ interface ErrorBoundaryProps {
 interface ErrorBoundaryState {
   failed: boolean;
   message: string;
+  stack: string;
 }
 
 export class ErrorBoundary extends Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
 > {
-  state: ErrorBoundaryState = { failed: false, message: "" };
+  state: ErrorBoundaryState = { failed: false, message: "", stack: "" };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { failed: true, message: error.message };
+    return { failed: true, message: error.message, stack: error.stack ?? "" };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
@@ -31,6 +32,7 @@ export class ErrorBoundary extends Component<
         <section
           className="panel fatal-error-card"
           data-error-message={this.state.message}
+          data-error-stack={this.state.stack}
         >
           <span className="fatal-error-icon">!</span>
           <span className="eyebrow">Interface recovery</span>

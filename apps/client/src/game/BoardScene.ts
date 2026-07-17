@@ -45,6 +45,7 @@ export class BoardScene extends Phaser.Scene {
   private touchPreviewActive = false;
   private previousSnapshot?: MatchSnapshot;
   private lastActionId = 0;
+  private shuttingDown = false;
 
   constructor(bridge: GameBridge) {
     super({ key: "BoardScene" });
@@ -52,6 +53,7 @@ export class BoardScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.shuttingDown = false;
     this.cameras.main.setBackgroundColor("#0b101a");
     this.graphics = this.add.graphics();
     this.pulseGraphics = this.add.graphics();
@@ -90,12 +92,16 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private shutdown(): void {
+    this.shuttingDown = true;
     delete this.game.canvas.dataset.boardReady;
     this.bridge.off(GameBridge.SNAPSHOT, this.receiveSnapshot, this);
     this.bridge.off(GameBridge.ACTION, this.receiveAction, this);
     this.input.off("pointerup", this.handlePointer, this);
     this.input.off("pointermove", this.handlePointerMove, this);
     this.input.off("gameout", this.clearHover, this);
+    this.graphics = undefined;
+    this.pulseGraphics = undefined;
+    this.snapshot = undefined;
   }
 
   private receiveSnapshot(
@@ -103,6 +109,7 @@ export class BoardScene extends Phaser.Scene {
     localPlayerId: string,
     interaction: BoardInteractionContext,
   ): void {
+    if (this.shuttingDown) return;
     this.previousSnapshot = this.snapshot;
     this.snapshot = snapshot;
     this.localPlayerId = localPlayerId;
@@ -112,6 +119,7 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private receiveAction(action: BoardActionEvent): void {
+    if (this.shuttingDown) return;
     if (action.id <= this.lastActionId) return;
     this.lastActionId = action.id;
     // React development remounts can leave a scene listener alive for the few

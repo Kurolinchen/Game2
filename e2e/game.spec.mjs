@@ -54,6 +54,9 @@ async function observedActionState(page) {
       fatalMessage:
         document.querySelector(".fatal-error-card")?.getAttribute("data-error-message") ??
         null,
+      fatalStack:
+        document.querySelector(".fatal-error-card")?.getAttribute("data-error-stack") ??
+        null,
     };
   });
 }
@@ -81,6 +84,7 @@ test("starts a visible CPU match, moves, and reconnects after reload", async ({
     connection: "Live room",
     fatalError: null,
     fatalMessage: null,
+    fatalStack: null,
   });
 
   await page.reload();
@@ -119,6 +123,7 @@ test("touch input previews an action before the second tap confirms it", async (
       connection: "Live room",
       fatalError: null,
       fatalMessage: null,
+      fatalStack: null,
     });
     await page.getByRole("button", { name: "Leave" }).click();
   } finally {
