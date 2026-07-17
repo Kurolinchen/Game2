@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: tactics-lite-server
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci && npm run build:server
+    startCommand: npm run start -w @tactics-lite/server
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: ALLOWED_ORIGINS
+        sync: false
