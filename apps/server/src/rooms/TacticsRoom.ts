@@ -23,6 +23,13 @@ import {
 } from "@tactics-lite/game-core";
 import { sanitizeDisplayName } from "./displayName.js";
 import {
+  CPU_DIFFICULTY_LABELS,
+  CPU_PLAYER_ID,
+  chooseCpuAction,
+  parseCpuDifficulty,
+  type CpuDifficulty,
+} from "./cpuOpponent.js";
+import {
   MatchState,
   PlayerState,
   TileState,
@@ -34,6 +41,11 @@ const ROOM_CODE_CHANNEL = "$tactics-lite-room-codes";
 
 interface JoinOptions {
   displayName?: unknown;
+}
+
+interface RoomOptions extends JoinOptions {
+  opponent?: unknown;
+  cpuDifficulty?: unknown;
 }
 
 interface MoveMessage {
@@ -62,7 +74,13 @@ interface AbilityOutcome {
 
 export class TacticsRoom extends Room<{ state: MatchState }> {
   state = new MatchState();
-  maxClients = GAME_CONFIG.room.maxPlayers;
+  maxClients: number = GAME_CONFIG.room.maxPlayers;
+  private cpuDifficulty?: CpuDifficulty;
+  private cpuActionsThisTurn = 0;
+  private readonly cpuClient = {
+    sessionId: CPU_PLAYER_ID,
+    send: () => undefined,
+  } as unknown as Client;
 
   messages = {
     ready: (client: Client) => this.handleReady(client),
@@ -75,7 +93,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     end_turn: (client: Client) => this.handleEndTurn(client),
   };
 
-  async onCreate(): Promise<void> {
+  async onCreate(options: RoomOptions = {}): Promise<void> {
     this.roomId = await this.reserveRoomCode();
     this.setPrivate();
 
@@ -85,6 +103,12 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     this.state.tiles.push(
       ...createWarehouseTiles().map((tile) => TileState.fromTile(tile)),
     );
+
+    if (options.opponent === "cpu") {
+      this.cpuDifficulty = parseCpuDifficulty(options.cpuDifficulty);
+      this.maxClients = 1;
+      this.addCpuPlayer(this.cpuDifficulty);
+    }
   }
 
   onJoin(client: Client, options: JoinOptions): void {
@@ -94,6 +118,8 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     player.slot = this.nextAvailableSlot();
     player.ready = false;
     player.connected = true;
+    player.isCpu = false;
+    player.difficulty = "";
     this.state.players.set(client.sessionId, player);
   }
 
@@ -599,6 +625,18 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     this.advanceTurn();
   }
 
+  private addCpuPlayer(difficulty: CpuDifficulty): void {
+    const player = new PlayerState();
+    player.id = CPU_PLAYER_ID;
+    player.displayName = `CPU · ${CPU_DIFFICULTY_LABELS[difficulty]}`;
+    player.slot = 1;
+    player.ready = true;
+    player.connected = true;
+    player.isCpu = true;
+    player.difficulty = difficulty;
+    this.state.players.set(player.id, player);
+  }
+
   private startMatch(): void {
     const players = this.orderedPlayers();
     if (players.length !== GAME_CONFIG.room.maxPlayers) return;
@@ -641,6 +679,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
       GAME_CONFIG.actions.actionPointsPerTurn;
     this.state.winnerId = "";
     this.lock();
+    if (this.state.activePlayerId === CPU_PLAYER_ID) this.scheduleCpuStep();
   }
 
   private checkVictory(attackingPlayerId: string): boolean {
@@ -679,9 +718,11 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     this.state.actionPointsRemaining =
       GAME_CONFIG.actions.actionPointsPerTurn;
     this.preparePlayerTurn(next.activePlayerId);
+    if (next.activePlayerId === CPU_PLAYER_ID) this.scheduleCpuStep();
   }
 
   private preparePlayerTurn(playerId: string): void {
+    if (playerId === CPU_PLAYER_ID) this.cpuActionsThisTurn = 0;
     for (const unit of this.state.units.values()) {
       if (unit.ownerId !== playerId || unit.isDecoy) continue;
       for (const [abilityId, remaining] of unit.cooldowns.entries()) {
@@ -695,6 +736,109 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
         unit.overwatchActive = false;
       }
     }
+  }
+
+  private scheduleCpuStep(): void {
+    if (
+      !this.cpuDifficulty ||
+      this.state.status !== "playing" ||
+      this.state.activePlayerId !== CPU_PLAYER_ID
+    ) {
+      return;
+    }
+    this.clock.setTimeout(() => this.runCpuStep(), 420);
+  }
+
+  private runCpuStep(): void {
+    if (
+      !this.cpuDifficulty ||
+      this.state.status !== "playing" ||
+      this.state.activePlayerId !== CPU_PLAYER_ID
+    ) {
+      return;
+    }
+    if (this.cpuActionsThisTurn >= 12) {
+      this.advanceTurn();
+      return;
+    }
+
+    const action = chooseCpuAction({
+      difficulty: this.cpuDifficulty,
+      playerId: CPU_PLAYER_ID,
+      actionPoints: this.state.actionPointsRemaining,
+      boardWidth: this.state.boardWidth,
+      boardHeight: this.state.boardHeight,
+      units: [...this.state.units.values()].map((unit) => ({
+        id: unit.id,
+        ownerId: unit.ownerId,
+        classId: unit.classId,
+        x: unit.x,
+        y: unit.y,
+        hp: unit.hp,
+        alive: unit.alive,
+        isDecoy: unit.isDecoy,
+        movementRange: unit.movementRange,
+        attackRange: unit.attackRange,
+        attackDamage: unit.attackDamage,
+        movementDiscountAvailable: unit.movementDiscountAvailable,
+        overwatchActive: unit.overwatchActive,
+        cooldowns: Object.fromEntries(unit.cooldowns.entries()),
+      })),
+      tiles: [...this.state.tiles.values()].map((tile) => ({
+        x: tile.x,
+        y: tile.y,
+        walkable: tile.walkable,
+        blocksLineOfSight: tile.blocksLineOfSight,
+        coverValue: tile.coverValue,
+      })),
+    });
+
+    if (action.type === "end_turn") {
+      this.advanceTurn();
+      return;
+    }
+
+    const before = this.cpuStateFingerprint();
+    this.cpuActionsThisTurn += 1;
+    if (action.type === "move") {
+      this.handleMove(this.cpuClient, action);
+    } else if (action.type === "attack") {
+      this.handleAttack(this.cpuClient, action);
+    } else {
+      this.handleAbility(this.cpuClient, action);
+    }
+
+    if (
+      this.state.status !== "playing" ||
+      this.state.activePlayerId !== CPU_PLAYER_ID
+    ) {
+      return;
+    }
+    if (before === this.cpuStateFingerprint()) {
+      this.advanceTurn();
+      return;
+    }
+    this.scheduleCpuStep();
+  }
+
+  private cpuStateFingerprint(): string {
+    const units = [...this.state.units.values()].map((unit) =>
+      [
+        unit.id,
+        unit.x,
+        unit.y,
+        unit.hp,
+        unit.alive,
+        unit.overwatchActive,
+        [...unit.cooldowns.entries()],
+      ].join(":"),
+    );
+    return [
+      this.state.status,
+      this.state.activePlayerId,
+      this.state.actionPointsRemaining,
+      ...units,
+    ].join("|");
   }
 
   private blockedPositions(): Position[] {
@@ -748,7 +892,10 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     this.state.actionPointsRemaining = 0;
     this.state.winnerId = "";
     this.state.units.clear();
-    for (const player of this.state.players.values()) player.ready = false;
+    this.cpuActionsThisTurn = 0;
+    for (const player of this.state.players.values()) {
+      player.ready = player.isCpu;
+    }
   }
 
   private reject(client: Client, message: string): void {

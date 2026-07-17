@@ -7,6 +7,8 @@ export class PlayerState extends Schema {
   @type("number") slot = 0;
   @type("boolean") ready = false;
   @type("boolean") connected = true;
+  @type("boolean") isCpu = false;
+  @type("string") difficulty = "";
 }
 
 export class UnitState extends Schema {
