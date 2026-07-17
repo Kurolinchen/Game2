@@ -120,6 +120,7 @@ export class BoardScene extends Phaser.Scene {
   private handlePointerMove(pointer: Phaser.Input.Pointer): void {
     if (pointer.wasTouch) return;
     const tile = this.pointerTile(pointer);
+    this.game.canvas.dataset.hoveredTile = tile ? `${tile.x}:${tile.y}` : "outside";
     if (
       tile?.x === this.hoveredTile?.x &&
       tile?.y === this.hoveredTile?.y
@@ -143,6 +144,9 @@ export class BoardScene extends Phaser.Scene {
   private handlePointer(pointer: Phaser.Input.Pointer): void {
     if (!this.snapshot) return;
     const tile = this.pointerTile(pointer);
+    this.game.canvas.dataset.lastPointerTile = tile
+      ? `${tile.x}:${tile.y}`
+      : "outside";
     if (!tile) return;
     const { x, y } = tile;
 

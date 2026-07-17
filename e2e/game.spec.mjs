@@ -40,6 +40,14 @@ async function tilePosition(canvas, x, y) {
   };
 }
 
+async function observedActionState(page, canvas) {
+  return {
+    ap: await page.locator(".ap-number").textContent().catch(() => null),
+    error: await page.locator(".toast-error").textContent().catch(() => null),
+    lastPointer: await canvas.getAttribute("data-last-pointer-tile"),
+  };
+}
+
 test("starts a visible CPU match, moves, and reconnects after reload", async ({
   page,
 }) => {
@@ -49,11 +57,14 @@ test("starts a visible CPU match, moves, and reconnects after reload", async ({
   const destination = await tilePosition(canvas, 1, 1);
   const beforeHover = await canvas.screenshot();
   await canvas.hover({ position: destination });
+  await expect(canvas).toHaveAttribute("data-hovered-tile", "1:1");
   const afterHover = await canvas.screenshot();
   expect(afterHover.equals(beforeHover)).toBe(false);
 
   await canvas.click({ position: destination });
-  await expect(page.locator(".ap-number")).toHaveText("5");
+  await expect
+    .poll(() => observedActionState(page, canvas), { timeout: 5_000 })
+    .toMatchObject({ ap: "5", error: null, lastPointer: "1:1" });
 
   await page.reload();
   await expect(page.locator(".board-canvas canvas")).toBeVisible();
@@ -82,7 +93,9 @@ test("touch input previews an action before the second tap confirms it", async (
     await expect(page.locator(".ap-number")).toHaveText("6");
 
     await canvas.tap({ position: destination });
-    await expect(page.locator(".ap-number")).toHaveText("5");
+    await expect
+      .poll(() => observedActionState(page, canvas), { timeout: 5_000 })
+      .toMatchObject({ ap: "5", error: null, lastPointer: "1:1" });
     await page.getByRole("button", { name: "Leave" }).click();
   } finally {
     await context.close();
