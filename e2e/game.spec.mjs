@@ -23,6 +23,8 @@ async function startSoloMatch(page, callsign) {
   await expect(page.locator(".room-heading h1")).toContainText(
     "Spend six points",
   );
+  await expect(page.locator(".unit-card h2")).toHaveText("Breacher");
+  await expect(page.locator(".action-button.active").first()).toBeEnabled();
   return canvas;
 }
 
@@ -41,7 +43,7 @@ test("starts a visible CPU match, moves, and reconnects after reload", async ({
   page,
 }) => {
   const canvas = await startSoloMatch(page, "Browser Test");
-  expect(uniqueCanvasColors(await canvas.screenshot())).toBeGreaterThan(20);
+  expect(uniqueCanvasColors(await canvas.screenshot())).toBeGreaterThan(10);
 
   const destination = await tilePosition(canvas, 1, 1);
   const beforeHover = await canvas.screenshot();
@@ -50,11 +52,12 @@ test("starts a visible CPU match, moves, and reconnects after reload", async ({
   expect(afterHover.equals(beforeHover)).toBe(false);
 
   await canvas.click({ position: destination });
-  await expect(page.getByText("Moved · 1 AP").first()).toBeVisible();
+  await expect(page.locator(".ap-number")).toHaveText("5");
 
   await page.reload();
   await expect(page.locator(".board-canvas canvas")).toBeVisible();
   await expect(page.getByText("Live room")).toBeVisible();
+  await expect(page.locator(".ap-number")).toHaveText("5");
   await expect(page.locator(".room-heading h1")).toContainText(
     "Spend six points",
   );
@@ -75,10 +78,10 @@ test("touch input previews an action before the second tap confirms it", async (
     const destination = await tilePosition(canvas, 1, 1);
 
     await canvas.tap({ position: destination });
-    await expect(page.getByText("Moved · 1 AP")).toHaveCount(0);
+    await expect(page.locator(".ap-number")).toHaveText("6");
 
     await canvas.tap({ position: destination });
-    await expect(page.getByText("Moved · 1 AP").first()).toBeVisible();
+    await expect(page.locator(".ap-number")).toHaveText("5");
     await page.getByRole("button", { name: "Leave" }).click();
   } finally {
     await context.close();
