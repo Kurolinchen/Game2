@@ -7,6 +7,9 @@ export type ActionMode = "move" | "attack" | AbilityId;
 export interface BoardInteractionContext {
   selectedUnitId: string;
   actionMode: ActionMode;
+  // Optional so retained snapshots published before the setting existed stay
+  // structurally identical.
+  reducedMotion?: boolean;
 }
 
 export type BoardSelection =

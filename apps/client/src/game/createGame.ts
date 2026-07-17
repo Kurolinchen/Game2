@@ -35,9 +35,38 @@ export function createBoardGame(parent: HTMLElement, bridge: GameBridge): Phaser
   const refreshScale = () => {
     window.setTimeout(() => game.scale.refresh(), 60);
   };
+  // Phaser caches the canvas position for input mapping and only re-measures
+  // on resize. Scrolling the page (the match view scrolls on phones) or the
+  // late web-font swap moves the canvas without resizing it, which would make
+  // taps land on the wrong tile. Scroll events arrive a frame late, so also
+  // refresh in the capture phase right before Phaser handles a pointer.
+  const updateBounds = () => game.scale.updateBounds();
+  const refreshInputBounds = (event: Event) => {
+    if (event.target === game.canvas) updateBounds();
+  };
   window.addEventListener("orientationchange", refreshScale);
+  window.addEventListener("scroll", updateBounds, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("pointerdown", refreshInputBounds, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener("pointermove", refreshInputBounds, {
+    capture: true,
+    passive: true,
+  });
+  void document.fonts.ready.then(updateBounds);
   game.events.once(Phaser.Core.Events.DESTROY, () => {
     window.removeEventListener("orientationchange", refreshScale);
+    window.removeEventListener("scroll", updateBounds, { capture: true });
+    window.removeEventListener("pointerdown", refreshInputBounds, {
+      capture: true,
+    });
+    window.removeEventListener("pointermove", refreshInputBounds, {
+      capture: true,
+    });
   });
   return game;
 }

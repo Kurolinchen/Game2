@@ -96,6 +96,11 @@ export class BoardScene extends Phaser.Scene {
     if (!selected || selected.ownerId !== this.localPlayerId) return;
 
     const center = this.tileCenter(selected);
+    if (!this.motionEnabled) {
+      this.pulseGraphics.lineStyle(3, 0xeffffb, 0.6);
+      this.pulseGraphics.strokeCircle(center.x, center.y, TILE_SIZE * 0.39);
+      return;
+    }
     const pulse = (Math.sin(time / 260) + 1) / 2;
     const radius = TILE_SIZE * (0.37 + pulse * 0.045);
     this.pulseGraphics.lineStyle(6, 0xeffffb, 0.1 + pulse * 0.08);
@@ -907,8 +912,15 @@ export class BoardScene extends Phaser.Scene {
     };
   }
 
+  private get motionEnabled(): boolean {
+    return !this.interaction.reducedMotion;
+  }
+
   private animateAction(action: BoardActionEvent): void {
     if (!this.snapshot) return;
+    // With reduced motion the next snapshot render shows the final state;
+    // skipping here silences every tween, camera shake, and particle burst.
+    if (!this.motionEnabled) return;
 
     if (action.type === "move") {
       this.animateMovement(action);

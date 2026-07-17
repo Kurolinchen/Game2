@@ -30,7 +30,17 @@ export async function startSoloMatch(page, callsign) {
   await expect(page.locator(".unit-card h2")).toHaveText("Breacher");
   await expect(page.locator(".action-button.active").first()).toBeEnabled();
   await expect(canvas).toHaveAttribute("data-selected-unit", /-breacher$/);
+  await waitForStableLayout(page);
   return canvas;
+}
+
+// The web fonts load asynchronously; a swap mid-test reflows the page and
+// shifts the canvas between measuring a tile position and clicking it.
+export async function waitForStableLayout(page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
 }
 
 export async function tilePosition(canvas, x, y) {

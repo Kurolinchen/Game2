@@ -32,7 +32,10 @@ button:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
   position: relative;
   min-height: 100vh;
   min-height: 100dvh;
-  overflow: hidden;
+  /* clip instead of hidden: the ambient blobs bleed past the edges, and a
+     hidden-overflow box can still be scrolled programmatically (e.g. by
+     focus scrolling), shifting the whole app sideways. */
+  overflow: clip;
   padding: 0
     max(clamp(20px, 5vw, 80px), env(safe-area-inset-right))
     calc(64px + env(safe-area-inset-bottom))
@@ -362,7 +365,9 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
   .landing-grid, .waiting-grid { grid-template-columns: 1fr; }
   .landing-grid { align-items: start; gap: 40px; }
   .hero-copy { padding-top: 35px; }
-  .match-grid { grid-template-columns: 1fr; }
+  /* minmax(0, …) keeps the track from adopting the board's capped width as
+     its minimum, which would push the grid past the viewport. */
+  .match-grid { grid-template-columns: minmax(0, 1fr); }
   .match-sidebar { grid-template-columns: 1fr 1fr; }
 }
 
@@ -402,6 +407,7 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
      panel below it instead of filling the whole screen. */
   .board-canvas, .board-loading {
     width: min(100%, max(280px, calc(100dvh - 420px)));
+    max-width: 100%;
     margin-inline: auto;
   }
   .action-tooltip { width: min(230px, 75vw); right: auto; left: 0; top: auto; bottom: calc(100% + 8px); transform: translateY(6px); }
@@ -422,7 +428,7 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
   .room-heading { margin-bottom: 10px; }
   .room-heading h1 { display: none; }
   .match-grid { grid-template-columns: minmax(0, 1.2fr) minmax(270px, 1fr); gap: 12px; align-items: start; }
-  .board-canvas, .board-loading { width: min(100%, calc(100dvh - 130px)); margin-inline: auto; }
+  .board-canvas, .board-loading { width: min(100%, calc(100dvh - 130px)); max-width: 100%; margin-inline: auto; }
   .match-sidebar { grid-template-columns: 1fr; gap: 12px; max-height: calc(100dvh - 96px); overflow-y: auto; }
   .sidebar-toggle { display: none; }
   .match-sidebar:not(.open) > .roster-panel,

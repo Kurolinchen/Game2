@@ -58,6 +58,46 @@ type ConnectionStatus =
 const Board = lazy(() =>
   import("./game/Board").then((module) => ({ default: module.Board })),
 );
+
+// Keeps Tab cycling inside an open dialog and restores focus on close.
+function useFocusTrap(active: boolean) {
+  const containerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!active || !container) return undefined;
+    const previous =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const focusable = () =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          'button, input, a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("disabled"));
+    focusable()[0]?.focus();
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      if (elements.length === 0) return;
+      const first = elements[0]!;
+      const last = elements[elements.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    container.addEventListener("keydown", handleKeydown);
+    return () => {
+      container.removeEventListener("keydown", handleKeydown);
+      previous?.focus();
+    };
+  }, [active]);
+  return containerRef;
+}
 const initialRoomCode =
   new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
 const CPU_OPTIONS: readonly {
@@ -131,9 +171,11 @@ export default function App() {
       return Number.isFinite(stored) ? Math.max(0, Math.min(1, stored)) : 0.45;
     },
   );
-  const [reducedMotion, setReducedMotion] = useState(
-    () => window.localStorage.getItem("tactics-lite-reduced-motion") === "true",
-  );
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    const stored = window.localStorage.getItem("tactics-lite-reduced-motion");
+    if (stored !== null) return stored === "true";
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  });
   const [highContrast, setHighContrast] = useState(
     () => window.localStorage.getItem("tactics-lite-high-contrast") === "true",
   );
@@ -645,6 +687,7 @@ export default function App() {
                       localPlayerId={localPlayerId}
                       selectedUnitId={selectedUnitId}
                       actionMode={actionMode}
+                      reducedMotion={reducedMotion}
                       actionEvent={boardAction}
                       onSelection={handleBoardSelection}
                     />
@@ -717,7 +760,10 @@ export default function App() {
           )}
 
           {(error || notice) && (
-            <p className={`toast ${error ? "toast-error" : ""}`}>
+            <p
+              className={`toast ${error ? "toast-error" : ""}`}
+              role={error ? "alert" : "status"}
+            >
               {error || notice}
             </p>
           )}
@@ -1221,7 +1267,7 @@ function MatchSidebar(props: MatchSidebarProps) {
           >
             <b>Move</b>
             <small>1 AP / tile</small>
-            <span className="action-tooltip">Choose a highlighted tile. Hover to preview the path and AP cost.</span>
+            <span className="action-tooltip">Choose a highlighted tile. Hover to preview the path and AP cost. Shortcut: M.</span>
           </button>
           <button
             className={props.actionMode === "attack" ? "action-button active attack" : "action-button attack"}
@@ -1235,7 +1281,7 @@ function MatchSidebar(props: MatchSidebarProps) {
           >
             <b>Attack</b>
             <small>{GAME_CONFIG.actions.standardAttackCost} AP</small>
-            <span className="action-tooltip">Fire at a highlighted enemy. Damage and cover are shown on hover.</span>
+            <span className="action-tooltip">Fire at a highlighted enemy. Damage and cover are shown on hover. Shortcut: A.</span>
           </button>
           {props.selectedUnit &&
             isCombatClass(props.selectedUnit.classId) &&
@@ -1375,9 +1421,10 @@ function TutorialDialog(props: {
 }) {
   const current = TUTORIAL_STEPS[props.step] ?? TUTORIAL_STEPS[0];
   const isLast = props.step >= TUTORIAL_STEPS.length - 1;
+  const trapRef = useFocusTrap(true);
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="panel modal-card tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+      <section ref={trapRef} className="panel modal-card tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
         <span className="tutorial-number">{current.icon}</span>
         <span className="eyebrow">Quick training · {props.step + 1}/{TUTORIAL_STEPS.length}</span>
         <h2 id="tutorial-title">{current.title}</h2>
@@ -1416,9 +1463,10 @@ function SettingsDialog(props: {
   onHighContrast(value: boolean): void;
   onClose(): void;
 }) {
+  const trapRef = useFocusTrap(true);
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="panel modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <section ref={trapRef} className="panel modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <span className="eyebrow">Preferences</span>
         <h2 id="settings-title">Game settings</h2>
         <label className="setting-row">

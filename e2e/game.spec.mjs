@@ -4,6 +4,7 @@ import {
   startSoloMatch,
   tilePosition,
   uniqueCanvasColors,
+  waitForStableLayout,
 } from "./helpers.mjs";
 
 test("two browsers can duel, surrender, inspect results, and rematch", async ({
@@ -35,6 +36,7 @@ test("two browsers can duel, surrender, inspect results, and rematch", async ({
         "data-board-ready",
         "true",
       );
+      await waitForStableLayout(page);
     }
 
     const firstCanvas = first.locator(".board-canvas canvas");
