@@ -97,12 +97,11 @@ export class BoardScene extends Phaser.Scene {
 
     const center = this.tileCenter(selected);
     const pulse = (Math.sin(time / 260) + 1) / 2;
+    const radius = TILE_SIZE * (0.37 + pulse * 0.045);
+    this.pulseGraphics.lineStyle(6, 0xeffffb, 0.1 + pulse * 0.08);
+    this.pulseGraphics.strokeCircle(center.x, center.y, radius + 5);
     this.pulseGraphics.lineStyle(2 + pulse * 2, 0xeffffb, 0.32 + pulse * 0.48);
-    this.pulseGraphics.strokeCircle(
-      center.x,
-      center.y,
-      TILE_SIZE * (0.37 + pulse * 0.045),
-    );
+    this.pulseGraphics.strokeCircle(center.x, center.y, radius);
   }
 
   private shutdown(): void {
@@ -271,6 +270,20 @@ export class BoardScene extends Phaser.Scene {
         TILE_SIZE - 6,
         8,
       );
+      // Bevel: a light top edge and dark bottom edge give each tile depth.
+      this.graphics.lineStyle(1, 0xffffff, 0.05);
+      this.graphics.lineBetween(left + 10, top + 5, left + TILE_SIZE - 10, top + 5);
+      this.graphics.lineStyle(1, 0x000000, 0.28);
+      this.graphics.lineBetween(
+        left + 10,
+        top + TILE_SIZE - 5,
+        left + TILE_SIZE - 10,
+        top + TILE_SIZE - 5,
+      );
+      if (isHovered) {
+        this.graphics.lineStyle(2, 0xffffff, 0.3);
+        this.graphics.strokeRoundedRect(left, top, TILE_SIZE, TILE_SIZE, 10);
+      }
 
       if (tile.tileType === "floor") this.drawFloorDetails(tile.x, tile.y, left, top);
       if (tile.tileType === "obstacle") this.drawObstacle(left, top);
@@ -315,10 +328,39 @@ export class BoardScene extends Phaser.Scene {
       CANVAS_SIZE - 48,
       24,
     );
+    // Layered dark inset strokes fake a vignette that pulls focus inward.
+    this.graphics.lineStyle(8, 0x000000, 0.12);
+    this.graphics.strokeRoundedRect(28, 28, CANVAS_SIZE - 56, CANVAS_SIZE - 56, 22);
+    this.graphics.lineStyle(18, 0x000000, 0.07);
+    this.graphics.strokeRoundedRect(37, 37, CANVAS_SIZE - 74, CANVAS_SIZE - 74, 20);
+    this.graphics.lineStyle(30, 0x000000, 0.03);
+    this.graphics.strokeRoundedRect(52, 52, CANVAS_SIZE - 104, CANVAS_SIZE - 104, 18);
     this.graphics.lineStyle(3, 0x47e5c1, 0.18);
     this.graphics.lineBetween(58, 42, CANVAS_SIZE - 58, 42);
     this.graphics.lineStyle(3, 0xff6b7a, 0.15);
     this.graphics.lineBetween(58, CANVAS_SIZE - 42, CANVAS_SIZE - 58, CANVAS_SIZE - 42);
+    // Corner ticks in team colors frame the two deployment edges.
+    const tick = 16;
+    this.graphics.lineStyle(3, 0x47e5c1, 0.5);
+    this.graphics.lineBetween(38, 38, 38 + tick, 38);
+    this.graphics.lineBetween(38, 38, 38, 38 + tick);
+    this.graphics.lineBetween(CANVAS_SIZE - 38, 38, CANVAS_SIZE - 38 - tick, 38);
+    this.graphics.lineBetween(CANVAS_SIZE - 38, 38, CANVAS_SIZE - 38, 38 + tick);
+    this.graphics.lineStyle(3, 0xff6b7a, 0.5);
+    this.graphics.lineBetween(38, CANVAS_SIZE - 38, 38 + tick, CANVAS_SIZE - 38);
+    this.graphics.lineBetween(38, CANVAS_SIZE - 38, 38, CANVAS_SIZE - 38 - tick);
+    this.graphics.lineBetween(
+      CANVAS_SIZE - 38,
+      CANVAS_SIZE - 38,
+      CANVAS_SIZE - 38 - tick,
+      CANVAS_SIZE - 38,
+    );
+    this.graphics.lineBetween(
+      CANVAS_SIZE - 38,
+      CANVAS_SIZE - 38,
+      CANVAS_SIZE - 38,
+      CANVAS_SIZE - 38 - tick,
+    );
   }
 
   private drawFloorDetails(
@@ -461,7 +503,12 @@ export class BoardScene extends Phaser.Scene {
       this.graphics.lineStyle(2, 0x6ea8ff, 0.9);
       this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.43);
     }
-    this.graphics.fillStyle(unitColor, 0.13);
+    // Concentric fills fake a soft radial glow around the silhouette.
+    this.graphics.fillStyle(unitColor, 0.05);
+    this.graphics.fillCircle(centerX, centerY, TILE_SIZE * 0.48);
+    this.graphics.fillStyle(unitColor, 0.09);
+    this.graphics.fillCircle(centerX, centerY, TILE_SIZE * 0.41);
+    this.graphics.fillStyle(unitColor, 0.14);
     this.graphics.fillCircle(centerX, centerY, TILE_SIZE * 0.34);
     this.graphics.fillStyle(unitColor, unit.isDecoy ? 0.45 : 1);
     if (unit.isDecoy) {
@@ -546,6 +593,15 @@ export class BoardScene extends Phaser.Scene {
     } else {
       this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.26);
     }
+    if (!unit.isDecoy) {
+      this.graphics.fillStyle(0xffffff, 0.16);
+      this.graphics.fillEllipse(
+        centerX - TILE_SIZE * 0.11,
+        centerY - TILE_SIZE * 0.13,
+        TILE_SIZE * 0.16,
+        TILE_SIZE * 0.09,
+      );
+    }
 
     const hpRatio = unit.hp / unit.maxHp;
     this.graphics.fillStyle(0x0a0f18, 0.95);
@@ -556,13 +612,23 @@ export class BoardScene extends Phaser.Scene {
       7,
       3,
     );
-    this.graphics.fillStyle(hpRatio > 0.4 ? 0x73e0a1 : 0xff6b7a, 1);
+    const hpColor =
+      hpRatio > 0.65 ? 0x73e0a1 : hpRatio > 0.35 ? 0xeac866 : 0xff6b7a;
+    this.graphics.fillStyle(hpColor, 1);
     this.graphics.fillRoundedRect(
       centerX - TILE_SIZE * 0.3 + 1,
       centerY + TILE_SIZE * 0.29 + 1,
       (TILE_SIZE * 0.6 - 2) * hpRatio,
       5,
       2,
+    );
+    this.graphics.lineStyle(1, 0x000000, 0.5);
+    this.graphics.strokeRoundedRect(
+      centerX - TILE_SIZE * 0.3,
+      centerY + TILE_SIZE * 0.29,
+      TILE_SIZE * 0.6,
+      7,
+      3,
     );
 
     const label = this.add
@@ -929,8 +995,17 @@ export class BoardScene extends Phaser.Scene {
     const from = this.tileCenter(source);
     const to = this.tileCenter(target);
     const beam = this.add.graphics();
-    beam.lineStyle(precisionShot ? 6 : 4, color, 0.96);
+    // Layered strokes fake a glowing beam: wide halo, colored mid, hot core.
+    beam.lineStyle(precisionShot ? 10 : 8, color, 0.16);
     beam.lineBetween(from.x, from.y, to.x, to.y);
+    beam.lineStyle(precisionShot ? 5 : 4, color, 0.5);
+    beam.lineBetween(from.x, from.y, to.x, to.y);
+    beam.lineStyle(2, 0xffffff, 0.95);
+    beam.lineBetween(from.x, from.y, to.x, to.y);
+    beam.fillStyle(color, 0.45);
+    beam.fillCircle(from.x, from.y, precisionShot ? 11 : 9);
+    beam.fillStyle(0xffffff, 0.85);
+    beam.fillCircle(from.x, from.y, precisionShot ? 5 : 4);
     beam.fillStyle(0xffffff, 1);
     beam.fillCircle(to.x, to.y, precisionShot ? 7 : 5);
     this.tweens.add({
@@ -1009,6 +1084,17 @@ export class BoardScene extends Phaser.Scene {
       ease: "Cubic.easeOut",
       onComplete: () => ring.destroy(),
     });
+    const innerRing = this.add.circle(center.x, center.y, 8, 0xff8e9a, 0);
+    innerRing.setStrokeStyle(3, 0xffffff, 0.9);
+    this.tweens.add({
+      targets: innerRing,
+      scale: 2.6,
+      alpha: 0,
+      delay: 140,
+      duration: 520,
+      ease: "Cubic.easeOut",
+      onComplete: () => innerRing.destroy(),
+    });
     this.spawnParticles(center, 0xff6b7a, 18);
   }
 
@@ -1016,14 +1102,19 @@ export class BoardScene extends Phaser.Scene {
     for (let index = 0; index < count; index += 1) {
       const angle = (Math.PI * 2 * index) / count + (index % 3) * 0.14;
       const distance = 24 + (index % 5) * 7;
-      const particle = this.add.rectangle(
-        center.x,
-        center.y,
-        index % 2 === 0 ? 6 : 3,
-        index % 2 === 0 ? 3 : 7,
-        color,
-        0.9,
-      );
+      // Mixing circles into the rectangle debris keeps bursts from looking
+      // uniform while staying deterministic.
+      const particle =
+        index % 3 === 2
+          ? this.add.circle(center.x, center.y, 2 + (index % 2) * 2, color, 0.9)
+          : this.add.rectangle(
+              center.x,
+              center.y,
+              index % 2 === 0 ? 6 : 3,
+              index % 2 === 0 ? 3 : 7,
+              color,
+              0.9,
+            );
       this.tweens.add({
         targets: particle,
         x: center.x + Math.cos(angle) * distance,
