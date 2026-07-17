@@ -107,6 +107,7 @@ export class BoardScene extends Phaser.Scene {
     this.snapshot = snapshot;
     this.localPlayerId = localPlayerId;
     this.interaction = interaction;
+    this.game.canvas.dataset.selectedUnit = interaction.selectedUnitId;
     this.renderBoard();
   }
 

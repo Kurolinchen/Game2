@@ -25,6 +25,7 @@ async function startSoloMatch(page, callsign) {
   );
   await expect(page.locator(".unit-card h2")).toHaveText("Breacher");
   await expect(page.locator(".action-button.active").first()).toBeEnabled();
+  await expect(canvas).toHaveAttribute("data-selected-unit", /-breacher$/);
   return canvas;
 }
 
