@@ -1393,24 +1393,46 @@ function ActionLog({ entries }: { entries: string[] }) {
 
 const TUTORIAL_STEPS = [
   {
-    title: "Select your operator",
-    text: "Choose a glowing squad member on the board or in the squad list. Each class has a distinct role and two abilities.",
+    title: "Your mission",
+    text: "Tactics Lite is a turn-based duel on an 8 x 8 grid. You command the three teal operators; your opponent commands the red ones. You take turns — in your turn you move, shoot, and use abilities. Eliminate all three enemy operators before they eliminate yours.",
+    tip: "You can reopen this training at any time with the ? button in the top bar.",
     icon: "01",
   },
   {
-    title: "Spend six action points",
-    text: "Movement costs one AP per tile and a standard attack costs two. Hover a highlighted tile to preview the exact cost.",
+    title: "Select an operator",
+    text: "Click or tap one of your glowing teal operators on the board, or pick one from the squad list. A white ring marks who is selected. Everything you order — moving, attacking, abilities — applies to that operator until you select another one.",
+    tip: "Keyboard: press 1, 2, or 3 to jump between your operators.",
     icon: "02",
   },
   {
-    title: "Use cover and sight lines",
-    text: "Low cover reduces incoming damage. Solid obstacles block shots. The hover preview shows damage after cover reduction.",
+    title: "Spend six action points",
+    text: "Each turn your whole squad shares 6 action points (AP) — the big number next to the board. Moving costs 1 AP per tile, a standard attack costs 2 AP, and every ability shows its own price on its button. Done or out of points? Press End turn to hand over.",
+    tip: "Unspent AP are lost when your turn ends, so make them count.",
     icon: "03",
   },
   {
-    title: "Break the opposing squad",
-    text: "Combine pushes, long shots, swaps, decoys, and overwatch. Eliminate all three enemy operators to secure the map.",
+    title: "Move across the grid",
+    text: "With Move selected, every tile you can reach lights up — click one and your operator walks there. On a computer, hovering a tile previews the exact path and AP cost first. On a touchscreen, your first tap shows that preview and tapping the same tile again confirms the move.",
+    tip: "Keyboard: M switches to Move mode.",
     icon: "04",
+  },
+  {
+    title: "Attack from cover",
+    text: "Switch to Attack and pick a highlighted enemy. The preview shows exactly how much damage you will deal before you commit. Wooden barriers are low cover — standing directly behind one means you take less damage. Solid crates block shots completely; nobody can shoot through them.",
+    tip: "Keyboard: A switches to Attack mode.",
+    icon: "05",
+  },
+  {
+    title: "Unleash abilities",
+    text: "Every operator has two special abilities below Move and Attack, each with an AP cost and a cooldown. The Breacher shoves enemies and smashes cover, the Sniper hits across the map and sets Overwatch (an automatic reaction shot at enemies that move in sight), and the Trickster swaps positions and drops decoys.",
+    tip: "Hover or focus an ability button to read exactly what it does.",
+    icon: "06",
+  },
+  {
+    title: "Break their formation",
+    text: "Win by eliminating all three red operators. The recent-actions log next to the board tells you what just happened, and the passive note under your buttons reminds you of your operator's built-in strength. That is everything you need — good hunting.",
+    tip: "Keyboard: E ends your turn.",
+    icon: "07",
   },
 ] as const;
 
@@ -1429,13 +1451,25 @@ function TutorialDialog(props: {
         <span className="eyebrow">Quick training · {props.step + 1}/{TUTORIAL_STEPS.length}</span>
         <h2 id="tutorial-title">{current.title}</h2>
         <p>{current.text}</p>
+        <p className="tutorial-tip"><b>Tip</b><span>{current.tip}</span></p>
         <div className="tutorial-progress">
           {TUTORIAL_STEPS.map((_, index) => (
             <i className={index <= props.step ? "active" : ""} key={index} />
           ))}
         </div>
-        <div className="modal-actions">
+        <div className={`modal-actions ${props.step > 0 ? "with-back" : ""}`}>
           <button className="ghost-button" onClick={props.onClose}>Skip tutorial</button>
+          {props.step > 0 && (
+            <button
+              className="ghost-button"
+              onClick={() => {
+                playUiSound();
+                props.onStep(props.step - 1);
+              }}
+            >
+              Back
+            </button>
+          )}
           <button
             className="primary-button"
             onClick={() => {
