@@ -18,8 +18,9 @@ async function startSoloMatch(page, callsign) {
   await page.getByRole("button", { name: /^Easy/ }).click();
   await page.getByRole("button", { name: "Start solo operation" }).click();
   await page.getByRole("button", { name: "I'm ready" }).click();
-  const canvas = page.locator('.board-canvas canvas[data-board-ready="true"]');
+  const canvas = page.locator(".board-canvas canvas");
   await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute("data-board-ready", "true");
   await expect(page.locator(".room-heading h1")).toContainText(
     "Spend six points",
   );
@@ -40,17 +41,18 @@ async function tilePosition(canvas, x, y) {
   };
 }
 
-async function observedActionState(page, canvas) {
-  const [apValues, errors, lastPointer] = await Promise.all([
-    page.locator(".ap-number").allTextContents(),
-    page.locator(".toast-error").allTextContents(),
-    canvas.getAttribute("data-last-pointer-tile"),
-  ]);
-  return {
-    ap: apValues[0] ?? null,
-    error: errors[0] ?? null,
-    lastPointer,
-  };
+async function observedActionState(page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector(".board-canvas canvas");
+    return {
+      ap: document.querySelector(".ap-number")?.textContent ?? null,
+      error: document.querySelector(".toast-error")?.textContent ?? null,
+      lastPointer: canvas?.getAttribute("data-last-pointer-tile") ?? null,
+      boardReady: canvas?.getAttribute("data-board-ready") ?? null,
+      connection: document.querySelector(".connection")?.textContent?.trim() ?? null,
+      fatalError: document.querySelector(".fatal-error-card h1")?.textContent ?? null,
+    };
+  });
 }
 
 test("starts a visible CPU match, moves, and reconnects after reload", async ({
@@ -68,10 +70,13 @@ test("starts a visible CPU match, moves, and reconnects after reload", async ({
 
   await canvas.click({ position: destination });
   await page.waitForTimeout(1_000);
-  expect(await observedActionState(page, canvas)).toEqual({
+  expect(await observedActionState(page)).toEqual({
     ap: "5",
     error: null,
     lastPointer: "1:1",
+    boardReady: "true",
+    connection: "Live room",
+    fatalError: null,
   });
 
   await page.reload();
@@ -102,10 +107,13 @@ test("touch input previews an action before the second tap confirms it", async (
 
     await canvas.tap({ position: destination });
     await page.waitForTimeout(1_000);
-    expect(await observedActionState(page, canvas)).toEqual({
+    expect(await observedActionState(page)).toEqual({
       ap: "5",
       error: null,
       lastPointer: "1:1",
+      boardReady: "true",
+      connection: "Live room",
+      fatalError: null,
     });
     await page.getByRole("button", { name: "Leave" }).click();
   } finally {
