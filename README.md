@@ -47,7 +47,7 @@ Render Free services spin down while idle, so the first request after a quiet pe
 
 ```bash
 npm run dev        # client and server
-npm run test       # 42 deterministic client, core, server, and CPU tests
+npm run test       # 44 deterministic client, core, server, and CPU tests
 npm run typecheck  # all workspaces
 npm run build      # production builds
 npm run smoke:multiplayer # exercises all abilities, then completes a two-client match
