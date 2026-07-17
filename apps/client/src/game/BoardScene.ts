@@ -68,6 +68,7 @@ export class BoardScene extends Phaser.Scene {
       this.renderBoard();
     }
     this.bridge.replayLatestAction();
+    this.game.canvas.dataset.boardReady = "true";
   }
 
   update(time: number): void {
@@ -89,6 +90,7 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private shutdown(): void {
+    delete this.game.canvas.dataset.boardReady;
     this.bridge.off(GameBridge.SNAPSHOT, this.receiveSnapshot, this);
     this.bridge.off(GameBridge.ACTION, this.receiveAction, this);
     this.input.off("pointerup", this.handlePointer, this);
@@ -128,6 +130,9 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private clearHover(): void {
+    // Touch previews must survive the pointer leaving after touchend so the
+    // next tap on the same tile can confirm the action.
+    if (this.touchPreviewActive) return;
     if (!this.hoveredTile) return;
     this.hoveredTile = undefined;
     this.touchPreviewActive = false;

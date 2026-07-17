@@ -18,7 +18,7 @@ async function startSoloMatch(page, callsign) {
   await page.getByRole("button", { name: /^Easy/ }).click();
   await page.getByRole("button", { name: "Start solo operation" }).click();
   await page.getByRole("button", { name: "I'm ready" }).click();
-  const canvas = page.locator(".board-canvas canvas");
+  const canvas = page.locator('.board-canvas canvas[data-board-ready="true"]');
   await expect(canvas).toBeVisible();
   await expect(page.locator(".room-heading h1")).toContainText(
     "Spend six points",
