@@ -2,8 +2,9 @@
 
 The playable core of a compact, server-authoritative browser tactics game. Two players join a private room and command three synchronized units each through deterministic, AP-driven combat.
 
-## Phases 1–3 include
+## Phases 1–4 include
 
+- solo matches against Easy, Normal, or Hard CPU opponents
 - room creation with a shareable six-character code and URL
 - exactly two players with display names and a ready check
 - synchronized 8 x 8 warehouse test grid
@@ -46,7 +47,7 @@ Render Free services spin down while idle, so the first request after a quiet pe
 
 ```bash
 npm run dev        # client and server
-npm run test       # 36 deterministic core and server utility tests
+npm run test       # 42 deterministic client, core, server, and CPU tests
 npm run typecheck  # all workspaces
 npm run build      # production builds
 npm run smoke:multiplayer # exercises all abilities, then completes a two-client match
@@ -61,7 +62,7 @@ npm run smoke:multiplayer # exercises all abilities, then completes a two-client
 
 No database or account system is required for this proof of concept. Rooms live in server memory and disappear when empty.
 
-## Known Phase 3 limitations
+## Known limitations
 
 - Room state is in memory; restarting the server removes active rooms.
 - A disconnect returns a running match to the waiting state. Token-based reconnect is reserved for the later polish phase.

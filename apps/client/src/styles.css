@@ -92,6 +92,16 @@ input { width: 100%; color: #edf5ff; background: #0c121d; border: 1px solid #253
 input::placeholder { color: #59667a; }
 input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,229,193,.08); }
 
+.difficulty-picker { margin: 4px 0 17px; }
+.difficulty-picker > span { display: block; margin-bottom: 9px; color: #aeb9ca; font-size: 12px; font-weight: 600; }
+.difficulty-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.difficulty-option { min-width: 0; padding: 11px 8px; color: #93a1b5; background: #0c121d; border: 1px solid #253247; border-radius: 11px; text-align: left; }
+.difficulty-option strong, .difficulty-option small { display: block; }
+.difficulty-option strong { color: #dce5f2; font-size: 11px; }
+.difficulty-option small { margin-top: 4px; font-size: 8px; line-height: 1.25; }
+.difficulty-option.selected { border-color: rgba(71,229,193,.62); background: rgba(71,229,193,.09); box-shadow: inset 0 0 20px rgba(71,229,193,.03); }
+.difficulty-option.selected strong { color: var(--mint); }
+
 .primary-button, .secondary-button, .ghost-button {
   border: 0; border-radius: 12px; min-height: 49px; padding: 0 18px; font-weight: 700; transition: transform .18s, background .18s, border .18s;
 }
@@ -100,6 +110,7 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
 .primary-button b { font-size: 20px; }
 .secondary-button { background: #202c3f; color: #edf3fd; border: 1px solid #304059; }
 .secondary-button:hover:not(:disabled) { background: #29374c; }
+.private-room-button { margin-top: 9px; }
 .ghost-button { min-height: 40px; background: transparent; color: #aeb9c9; border: 1px solid var(--panel-border); font-size: 12px; }
 .ghost-button:hover { color: #fff; border-color: #53637b; }
 .ghost-button.danger:hover { color: #ff8e9a; border-color: rgba(255,107,122,.4); }
@@ -124,12 +135,16 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
 .room-code { margin-top: 34px; background: #0a1019; border: 1px solid #27354a; border-radius: 15px; color: #fff; text-align: left; padding: 17px 20px; }
 .room-code span { display: block; color: var(--mint); letter-spacing: .2em; font: 700 23px "Space Grotesk"; }
 .room-code small { color: var(--muted); }
+.cpu-summary { margin-top: 34px; padding: 17px 20px; background: #0a1019; border: 1px solid rgba(255,107,122,.3); border-radius: 15px; }
+.cpu-summary span { display: block; color: var(--red); font: 700 20px "Space Grotesk"; }
+.cpu-summary small { color: var(--muted); }
 .player-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .player-slot { min-height: 420px; padding: 28px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .slot-label { align-self: flex-start; color: #68768c; text-transform: uppercase; letter-spacing: .13em; font-size: 10px; }
 .player-orb { width: 96px; height: 96px; margin: auto 0 20px; display: grid; place-items: center; border-radius: 50%; background: rgba(71,229,193,.16); border: 2px solid var(--mint); color: var(--mint); font: 700 24px "Space Grotesk"; box-shadow: 0 0 45px rgba(71,229,193,.12); }
 .player-slot-1 .player-orb { color: var(--red); border-color: var(--red); background: rgba(255,107,122,.14); box-shadow: 0 0 45px rgba(255,107,122,.10); }
 .player-orb.empty { color: #566378; border-color: #334056; background: #151d2a; box-shadow: none; }
+.player-orb.cpu { color: var(--red); border-color: var(--red); background: rgba(255,107,122,.14); box-shadow: 0 0 45px rgba(255,107,122,.1); }
 .player-slot h3 { font: 600 22px "Space Grotesk"; margin: 0 0 7px; }
 .ready-state { color: #7b899e; font-size: 12px; margin-bottom: 27px; }
 .ready-state.ready { color: var(--mint); }
@@ -225,6 +240,7 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
   .brand small, .connection { display: none; }
   .hero-copy h1 { font-size: 47px; }
   .lobby-card { padding: 24px; }
+  .difficulty-options { grid-template-columns: 1fr; }
   .room-heading { align-items: flex-start; flex-direction: column; }
   .room-actions { width: 100%; }
   .room-actions button { flex: 1; }

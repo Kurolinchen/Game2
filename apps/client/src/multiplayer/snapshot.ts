@@ -12,6 +12,8 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
       slot: player.slot,
       ready: player.ready,
       connected: player.connected,
+      isCpu: player.isCpu,
+      difficulty: player.difficulty,
     });
   });
   state.units?.forEach((unit) => {

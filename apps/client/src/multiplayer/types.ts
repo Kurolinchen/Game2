@@ -4,6 +4,8 @@ export interface PlayerSnapshot {
   slot: number;
   ready: boolean;
   connected: boolean;
+  isCpu: boolean;
+  difficulty: string;
 }
 
 export interface UnitSnapshot {

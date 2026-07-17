@@ -19,6 +19,7 @@ import type {
 import {
   createTacticsRoom,
   joinTacticsRoom,
+  type CpuDifficulty,
   type TacticsRoomConnection,
 } from "./multiplayer/client";
 import { toMatchSnapshot } from "./multiplayer/snapshot";
@@ -39,6 +40,15 @@ const Board = lazy(() =>
 );
 const initialRoomCode =
   new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
+const CPU_OPTIONS: readonly {
+  id: CpuDifficulty;
+  label: string;
+  description: string;
+}[] = [
+  { id: "easy", label: "Easy", description: "Loose and unpredictable" },
+  { id: "normal", label: "Normal", description: "Focused fundamentals" },
+  { id: "hard", label: "Hard", description: "Abilities and kill pressure" },
+];
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -79,6 +89,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [selectedUnitId, setSelectedUnitId] = useState("");
   const [actionMode, setActionMode] = useState<ActionMode>("move");
+  const [cpuDifficulty, setCpuDifficulty] = useState<CpuDifficulty>("normal");
 
   const localPlayerId = room?.sessionId ?? "";
   const localPlayer = snapshot?.players.find(
@@ -92,6 +103,8 @@ export default function App() {
   );
   const isMyTurn = snapshot?.activePlayerId === localPlayerId;
   const didWin = snapshot?.winnerId === localPlayerId;
+  const cpuPlayer = snapshot?.players.find((player) => player.isCpu);
+  const isCpuMatch = Boolean(cpuPlayer);
 
   const attachRoom = useCallback((nextRoom: TacticsRoomConnection) => {
     setRoom(nextRoom);
@@ -132,7 +145,7 @@ export default function App() {
   }, []);
 
   const connect = useCallback(
-    async (mode: "create" | "join") => {
+    async (mode: "create" | "cpu" | "join") => {
       const cleanName = displayName.trim();
       if (!cleanName) return setError("Enter a display name first.");
       if (mode === "join" && roomCode.trim().length !== 6) {
@@ -144,16 +157,19 @@ export default function App() {
       window.localStorage.setItem("tactics-lite-name", cleanName);
       try {
         const nextRoom =
-          mode === "create"
-            ? await createTacticsRoom(cleanName)
-            : await joinTacticsRoom(roomCode, cleanName);
+          mode === "join"
+            ? await joinTacticsRoom(roomCode, cleanName)
+            : await createTacticsRoom(
+                cleanName,
+                mode === "cpu" ? cpuDifficulty : undefined,
+              );
         attachRoom(nextRoom);
       } catch (connectionError) {
         setStatus("idle");
         setError(errorMessage(connectionError));
       }
     },
-    [attachRoom, displayName, roomCode],
+    [attachRoom, cpuDifficulty, displayName, roomCode],
   );
 
   const leaveRoom = useCallback(async () => {
@@ -329,7 +345,7 @@ export default function App() {
           <span className="brand-mark">TL</span>
           <span>
             <strong>Tactics Lite</strong>
-            <small>Phase 03 · Signature Abilities</small>
+            <small>Phase 04 · CPU Opponents</small>
           </span>
         </a>
         <span className={`connection connection-${status}`}>
@@ -343,8 +359,10 @@ export default function App() {
           roomCode={roomCode}
           status={status}
           error={error}
+          cpuDifficulty={cpuDifficulty}
           onDisplayName={setDisplayName}
           onRoomCode={setRoomCode}
+          onCpuDifficulty={setCpuDifficulty}
           onConnect={connect}
         />
       ) : (
@@ -352,14 +370,18 @@ export default function App() {
           <div className="room-heading">
             <div>
               <span className="eyebrow">
-                Warehouse · Room {snapshot?.roomCode ?? room.roomId}
+                {isCpuMatch
+                  ? `Warehouse · Solo vs ${cpuPlayer?.difficulty ?? "CPU"}`
+                  : `Warehouse · Room ${snapshot?.roomCode ?? room.roomId}`}
               </span>
               <h1>{subtitle}</h1>
             </div>
             <div className="room-actions">
-              <button className="ghost-button" onClick={() => void copyInvite()}>
-                Copy invite
-              </button>
+              {!isCpuMatch && (
+                <button className="ghost-button" onClick={() => void copyInvite()}>
+                  Copy invite
+                </button>
+              )}
               <button
                 className="ghost-button danger"
                 onClick={() => void leaveRoom()}
@@ -427,9 +449,11 @@ interface LandingProps {
   roomCode: string;
   status: ConnectionStatus;
   error: string;
+  cpuDifficulty: CpuDifficulty;
   onDisplayName(value: string): void;
   onRoomCode(value: string): void;
-  onConnect(mode: "create" | "join"): Promise<void>;
+  onCpuDifficulty(value: CpuDifficulty): void;
+  onConnect(mode: "create" | "cpu" | "join"): Promise<void>;
 }
 
 function Landing(props: LandingProps) {
@@ -468,13 +492,41 @@ function Landing(props: LandingProps) {
             disabled={props.status === "connecting"}
           />
         </label>
+        <div className="difficulty-picker">
+          <span>CPU difficulty</span>
+          <div className="difficulty-options">
+            {CPU_OPTIONS.map((option) => (
+              <button
+                type="button"
+                className={
+                  props.cpuDifficulty === option.id
+                    ? "difficulty-option selected"
+                    : "difficulty-option"
+                }
+                onClick={() => props.onCpuDifficulty(option.id)}
+                disabled={props.status === "connecting"}
+                key={option.id}
+              >
+                <strong>{option.label}</strong>
+                <small>{option.description}</small>
+              </button>
+            ))}
+          </div>
+        </div>
         <button
           className="primary-button"
+          onClick={() => void props.onConnect("cpu")}
+          disabled={props.status === "connecting"}
+        >
+          <span>Play versus CPU</span>
+          <b>▶</b>
+        </button>
+        <button
+          className="secondary-button full-width private-room-button"
           onClick={() => void props.onConnect("create")}
           disabled={props.status === "connecting"}
         >
           <span>Create private room</span>
-          <b>↗</b>
         </button>
         <div className="divider">
           <span>or join by code</span>
@@ -518,19 +570,29 @@ interface WaitingRoomProps {
 }
 
 function WaitingRoom(props: WaitingRoomProps) {
+  const cpuPlayer = props.snapshot?.players.find((player) => player.isCpu);
   return (
     <div className="waiting-grid">
       <div className="panel briefing-panel">
-        <span className="eyebrow">Ready check</span>
-        <h2>Deploy both squads.</h2>
+        <span className="eyebrow">
+          {cpuPlayer ? "Solo operation" : "Ready check"}
+        </span>
+        <h2>{cpuPlayer ? `Challenge the ${cpuPlayer.difficulty} CPU.` : "Deploy both squads."}</h2>
         <p>
           Each player receives a Breacher, Sniper, and Trickster. Eliminate all
           three opposing units to win.
         </p>
-        <button className="room-code" onClick={() => void props.onCopy()}>
-          <span>{props.snapshot?.roomCode ?? props.roomId}</span>
-          <small>Click to copy invite link</small>
-        </button>
+        {cpuPlayer ? (
+          <div className="cpu-summary">
+            <span>{cpuPlayer.displayName}</span>
+            <small>Server-controlled opponent · Ready when you are</small>
+          </div>
+        ) : (
+          <button className="room-code" onClick={() => void props.onCopy()}>
+            <span>{props.snapshot?.roomCode ?? props.roomId}</span>
+            <small>Click to copy invite link</small>
+          </button>
+        )}
       </div>
 
       <div className="player-slots">
@@ -540,10 +602,12 @@ function WaitingRoom(props: WaitingRoomProps) {
           );
           return (
             <div className={`panel player-slot player-slot-${slot}`} key={slot}>
-              <span className="slot-label">Player {slot + 1}</span>
+              <span className="slot-label">
+                {player?.isCpu ? "CPU opponent" : `Player ${slot + 1}`}
+              </span>
               {player ? (
                 <>
-                  <div className="player-orb">
+                  <div className={player.isCpu ? "player-orb cpu" : "player-orb"}>
                     {player.displayName.slice(0, 2).toUpperCase()}
                   </div>
                   <h3>{player.displayName}</h3>
@@ -552,7 +616,11 @@ function WaitingRoom(props: WaitingRoomProps) {
                       player.ready ? "ready-state ready" : "ready-state"
                     }
                   >
-                    {player.ready ? "Ready" : "Standing by"}
+                    {player.isCpu
+                      ? `${player.difficulty} difficulty`
+                      : player.ready
+                        ? "Ready"
+                        : "Standing by"}
                   </span>
                   {player.id === props.localPlayerId && (
                     <button
