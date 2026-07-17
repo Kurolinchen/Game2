@@ -20,7 +20,9 @@ async function startSoloMatch(page, callsign) {
   await page.getByRole("button", { name: "I'm ready" }).click();
   const canvas = page.locator(".board-canvas canvas");
   await expect(canvas).toBeVisible();
-  await expect(page.getByText("Round 1").first()).toBeVisible();
+  await expect(page.locator(".room-heading h1")).toContainText(
+    "Spend six points",
+  );
   return canvas;
 }
 
@@ -53,7 +55,9 @@ test("starts a visible CPU match, moves, and reconnects after reload", async ({
   await page.reload();
   await expect(page.locator(".board-canvas canvas")).toBeVisible();
   await expect(page.getByText("Live room")).toBeVisible();
-  await expect(page.getByText(/Round 1/).first()).toBeVisible();
+  await expect(page.locator(".room-heading h1")).toContainText(
+    "Spend six points",
+  );
   await page.getByRole("button", { name: "Leave" }).click();
 });
 
