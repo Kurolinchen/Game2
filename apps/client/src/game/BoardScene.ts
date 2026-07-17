@@ -114,6 +114,10 @@ export class BoardScene extends Phaser.Scene {
   private receiveAction(action: BoardActionEvent): void {
     if (action.id <= this.lastActionId) return;
     this.lastActionId = action.id;
+    // React development remounts can leave a scene listener alive for the few
+    // milliseconds in which Phaser is tearing its plugins down. Never start
+    // an animation after the scene (and its tween manager) became inactive.
+    if (!this.sys.isActive() || !this.tweens) return;
     this.animateAction(action);
   }
 
