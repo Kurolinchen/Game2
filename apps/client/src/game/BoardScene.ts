@@ -44,7 +44,12 @@ export class BoardScene extends Phaser.Scene {
     this.input.on("pointerup", this.handlePointer, this);
     this.bridge.on(GameBridge.SNAPSHOT, this.receiveSnapshot, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
-    this.renderBoard();
+
+    // React can publish the initial snapshot before Phaser has finished creating
+    // this scene. Replay the retained value so the board never starts empty.
+    if (!this.bridge.replayLatestSnapshot()) {
+      this.renderBoard();
+    }
   }
 
   private shutdown(): void {

@@ -18,16 +18,39 @@ export interface TileSelection {
   y: number;
 }
 
+interface PublishedSnapshot {
+  snapshot: MatchSnapshot;
+  localPlayerId: string;
+  context: BoardInteractionContext;
+}
+
 export class GameBridge extends Phaser.Events.EventEmitter {
   static readonly SNAPSHOT = "snapshot";
   static readonly SELECTION = "selection";
+
+  private latestSnapshot?: PublishedSnapshot;
 
   publishSnapshot(
     snapshot: MatchSnapshot,
     localPlayerId: string,
     context: BoardInteractionContext,
   ): void {
+    this.latestSnapshot = {
+      snapshot,
+      localPlayerId,
+      context: { ...context },
+    };
     this.emit(GameBridge.SNAPSHOT, snapshot, localPlayerId, context);
+  }
+
+  replayLatestSnapshot(): boolean {
+    if (!this.latestSnapshot) {
+      return false;
+    }
+
+    const { snapshot, localPlayerId, context } = this.latestSnapshot;
+    this.emit(GameBridge.SNAPSHOT, snapshot, localPlayerId, context);
+    return true;
   }
 
   select(selection: BoardSelection): void {
