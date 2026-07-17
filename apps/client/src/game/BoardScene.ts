@@ -54,6 +54,13 @@ export class BoardScene extends Phaser.Scene {
 
   create(): void {
     this.shuttingDown = false;
+    // React StrictMode can destroy the first Phaser game before its async
+    // scene creation callback runs. Never subscribe a scene whose canvas was
+    // already detached, otherwise it would keep receiving bridge snapshots.
+    if (!this.game.canvas.isConnected) {
+      this.shuttingDown = true;
+      return;
+    }
     this.cameras.main.setBackgroundColor("#0b101a");
     this.graphics = this.add.graphics();
     this.pulseGraphics = this.add.graphics();
@@ -109,7 +116,7 @@ export class BoardScene extends Phaser.Scene {
     localPlayerId: string,
     interaction: BoardInteractionContext,
   ): void {
-    if (this.shuttingDown) return;
+    if (this.shuttingDown || !this.game.canvas.isConnected) return;
     this.previousSnapshot = this.snapshot;
     this.snapshot = snapshot;
     this.localPlayerId = localPlayerId;
@@ -119,7 +126,7 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private receiveAction(action: BoardActionEvent): void {
-    if (this.shuttingDown) return;
+    if (this.shuttingDown || !this.game.canvas.isConnected) return;
     if (action.id <= this.lastActionId) return;
     this.lastActionId = action.id;
     // React development remounts can leave a scene listener alive for the few
