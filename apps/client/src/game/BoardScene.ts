@@ -860,23 +860,14 @@ export class BoardScene extends Phaser.Scene {
     const points = [origin, ...action.path].map((point) => this.tileCenter(point));
     if (points.length < 2) return;
     const color = this.unitColor(unit);
-    const marker = this.add.container(points[0]!.x, points[0]!.y);
-    const body = this.add.graphics();
-    body.fillStyle(0x02060b, 0.5);
-    body.fillEllipse(3, 11, TILE_SIZE * 0.48, TILE_SIZE * 0.17);
-    body.fillStyle(color, 0.96);
-    body.fillCircle(0, 0, TILE_SIZE * 0.2);
-    body.lineStyle(3, 0xffffff, 0.78);
-    body.strokeCircle(0, 0, TILE_SIZE * 0.2);
-    const glyph = this.add
-      .text(0, 0, this.classGlyph(unit.classId), {
-        color: "#07110f",
-        fontFamily: "Inter, system-ui, sans-serif",
-        fontSize: "16px",
-        fontStyle: "bold",
-      })
-      .setOrigin(0.5);
-    marker.add([body, glyph]);
+    const marker = this.add.graphics();
+    marker.setPosition(points[0]!.x, points[0]!.y);
+    marker.fillStyle(0x02060b, 0.5);
+    marker.fillEllipse(3, 11, TILE_SIZE * 0.48, TILE_SIZE * 0.17);
+    marker.fillStyle(color, 0.96);
+    marker.fillCircle(0, 0, TILE_SIZE * 0.2);
+    marker.lineStyle(3, 0xffffff, 0.78);
+    marker.strokeCircle(0, 0, TILE_SIZE * 0.2);
 
     const progress = { value: 0 };
     this.tweens.add({
@@ -895,7 +886,7 @@ export class BoardScene extends Phaser.Scene {
           Phaser.Math.Linear(from.y, to.y, localProgress),
         );
       },
-      onComplete: () => marker.destroy(true),
+      onComplete: () => marker.destroy(),
     });
   }
 
