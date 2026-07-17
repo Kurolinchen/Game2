@@ -14,6 +14,7 @@ interface BoardProps {
   localPlayerId: string;
   selectedUnitId: string;
   actionMode: ActionMode;
+  reducedMotion: boolean;
   actionEvent?: BoardActionEvent;
   onSelection(selection: BoardSelection): void;
 }
@@ -23,6 +24,7 @@ export function Board({
   localPlayerId,
   selectedUnitId,
   actionMode,
+  reducedMotion,
   actionEvent,
   onSelection,
 }: BoardProps) {
@@ -39,9 +41,13 @@ export function Board({
   }, [bridge]);
 
   useEffect(() => {
-    const context: BoardInteractionContext = { selectedUnitId, actionMode };
+    const context: BoardInteractionContext = {
+      selectedUnitId,
+      actionMode,
+      reducedMotion,
+    };
     bridge.publishSnapshot(snapshot, localPlayerId, context);
-  }, [actionMode, bridge, snapshot, localPlayerId, selectedUnitId]);
+  }, [actionMode, bridge, snapshot, localPlayerId, reducedMotion, selectedUnitId]);
 
   useEffect(() => {
     if (actionEvent) bridge.publishAction(actionEvent);

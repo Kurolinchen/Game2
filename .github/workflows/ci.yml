@@ -21,9 +21,19 @@ jobs:
       - run: npm run build
       - name: Run multiplayer smoke
         run: |
-          npm run start -w @tactics-lite/server > server.log 2>&1 &
+          setsid npm run start -w @tactics-lite/server > server.log 2>&1 &
           SERVER_PID=$!
-          trap 'kill "$SERVER_PID"' EXIT
+          stop_server() {
+            # Kill the whole process group: killing only the npm wrapper
+            # orphans the node child, which keeps port 2567 busy and fails
+            # the Playwright web server in the e2e step.
+            kill -- "-$SERVER_PID" 2>/dev/null || true
+            for attempt in {1..15}; do
+              curl --fail --silent http://127.0.0.1:2567/health > /dev/null 2>&1 || return 0
+              sleep 1
+            done
+          }
+          trap stop_server EXIT
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:2567/health > /dev/null; then break; fi
             sleep 1
