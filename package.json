@@ -14,6 +14,7 @@
     "dev": "concurrently -n server,client -c magenta,cyan \"npm run dev -w @tactics-lite/server\" \"npm run dev -w @tactics-lite/client\"",
     "dev:server": "npm run dev -w @tactics-lite/server",
     "dev:client": "npm run dev -w @tactics-lite/client",
+    "build:server": "npm run build -w @tactics-lite/game-core && npm run build -w @tactics-lite/server",
     "smoke:multiplayer": "node scripts/smoke-multiplayer.mjs",
     "build": "npm run build -w @tactics-lite/game-core && npm run build -w @tactics-lite/server && npm run build -w @tactics-lite/client",
     "typecheck": "npm run build -w @tactics-lite/game-core && npm run typecheck --workspaces --if-present",

@@ -30,6 +30,18 @@ Open `http://localhost:5173` in two browser windows. Create a room in the first 
 
 The client uses `http://localhost:2567` by default. Copy `.env.example` to `.env` and set `VITE_SERVER_URL` for another server URL.
 
+## Deploy with Render Free and Vercel
+
+The repository includes a `render.yaml` Blueprint for a free Render web service. No database is needed.
+
+1. In Render, choose **New > Blueprint**, connect this GitHub repository, and deploy the detected `tactics-lite-server` service.
+2. Wait for the service to report **Live**, then open its `/health` URL. It should return `{"status":"ok","service":"tactics-lite-server"}`.
+3. Copy the Render service URL without a trailing slash, for example `https://tactics-lite-server.onrender.com`.
+4. In the Vercel project, add `VITE_SERVER_URL` with that URL for **Production** and **Preview**.
+5. Redeploy the latest `main` deployment in Vercel.
+
+Render Free services spin down while idle, so the first request after a quiet period can take longer. Opening `/health` wakes the server before a play session.
+
 ## Commands
 
 ```bash
