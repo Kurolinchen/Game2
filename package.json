@@ -16,12 +16,16 @@
     "dev:client": "npm run dev -w @tactics-lite/client",
     "build:server": "npm run build -w @tactics-lite/game-core && npm run build -w @tactics-lite/server",
     "smoke:multiplayer": "node scripts/smoke-multiplayer.mjs",
+    "balance:cpu": "npm run build:server && node scripts/simulate-cpu-balance.mjs",
+    "test:e2e": "npm run build:server && playwright test",
     "build": "npm run build -w @tactics-lite/game-core && npm run build -w @tactics-lite/server && npm run build -w @tactics-lite/client",
     "typecheck": "npm run build -w @tactics-lite/game-core && npm run typecheck --workspaces --if-present",
     "test": "npm run build -w @tactics-lite/game-core && npm run test --workspaces --if-present"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "concurrently": "10.0.3",
+    "pngjs": "7.0.0",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }

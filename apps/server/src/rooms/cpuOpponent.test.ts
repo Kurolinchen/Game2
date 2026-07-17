@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { chooseCpuAction, parseCpuDifficulty, type CpuDecisionContext } from "./cpuOpponent.js";
+import {
+  chooseCpuAction,
+  createSeededRandom,
+  parseCpuDifficulty,
+  type CpuDecisionContext,
+} from "./cpuOpponent.js";
 
 const floorTiles = Array.from({ length: 8 * 8 }, (_, index) => ({
   x: index % 8,
@@ -56,6 +61,17 @@ function context(overrides: Partial<CpuDecisionContext> = {}): CpuDecisionContex
 }
 
 describe("CPU opponent", () => {
+  it("provides repeatable random choices for balance simulations", () => {
+    const first = createSeededRandom(42);
+    const second = createSeededRandom(42);
+
+    expect([first(), first(), first()]).toEqual([
+      second(),
+      second(),
+      second(),
+    ]);
+  });
+
   it("defaults unknown difficulties to normal", () => {
     expect(parseCpuDifficulty("impossible")).toBe("normal");
   });

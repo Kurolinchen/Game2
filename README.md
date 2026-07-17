@@ -2,13 +2,16 @@
 
 The playable core of a compact, server-authoritative browser tactics game. Two players join a private room and command three synchronized units each through deterministic, AP-driven combat.
 
-## Phases 1–5 include
+## Phases 1–6 include
 
 - solo matches against Easy, Normal, or Hard CPU opponents
 - hover movement paths, AP costs, attack lines, damage, and cover previews
 - animated movement, shots, push, swap, cover destruction, and eliminations
 - distinct class silhouettes, turn banners, CPU status, and a recent-action log
 - dedicated Solo Operation and Private Duel lobby cards
+- automatic and reload-safe reconnects with a 60-second reserved seat
+- cold-start recovery, UI error containment, and public-server rate limits
+- two-tap touch confirmation, browser E2E coverage, and CPU balance simulations
 - room creation with a shareable six-character code and URL
 - exactly two players with display names and a ready check
 - synchronized 8 x 8 warehouse test grid
@@ -51,10 +54,12 @@ Render Free services spin down while idle, so the first request after a quiet pe
 
 ```bash
 npm run dev        # client and server
-npm run test       # 45 deterministic client, core, server, and CPU tests
+npm run test       # 49 deterministic client, core, server, and CPU tests
 npm run typecheck  # all workspaces
 npm run build      # production builds
-npm run smoke:multiplayer # exercises all abilities, then completes a two-client match
+npm run test:e2e   # real Chromium flow, canvas check, touch, and reload reconnect
+npm run balance:cpu # runs nine seeded CPU balance matches
+npm run smoke:multiplayer # reconnects, exercises all abilities, and completes a match
 ```
 
 ## Repository layout
@@ -69,6 +74,6 @@ No database or account system is required for this proof of concept. Rooms live 
 ## Known limitations
 
 - Room state is in memory; restarting the server removes active rooms.
-- A disconnect returns a running match to the waiting state. Token-based reconnect is reserved for the later polish phase.
-- Team selection, rematch, reconnect tokens, sound, and final action animations remain later-phase work.
+- Reconnect survives short drops and reloads, but not a full server restart because room state remains in memory.
+- Team selection, rematch, sound, and richer sprite artwork remain later-phase work.
 - Phaser is lazy-loaded only when a match starts, but its isolated production chunk is still about 1.2 MB before gzip.

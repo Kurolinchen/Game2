@@ -150,9 +150,19 @@ async function playAggressiveTurn(room, ownerId) {
 const firstClient = new Client(endpoint);
 const secondClient = new Client(endpoint);
 const firstRoom = await firstClient.create("tactics", { displayName: "Alpha" });
-const secondRoom = await secondClient.joinById(firstRoom.roomId, {
+firstRoom.onMessage("player:reconnecting", () => {});
+firstRoom.onMessage("player:reconnected", () => {});
+let secondRoom = await secondClient.joinById(firstRoom.roomId, {
   displayName: "Bravo",
 });
+const secondSessionId = secondRoom.sessionId;
+const secondReconnectToken = secondRoom.reconnectionToken;
+secondRoom.reconnection.enabled = false;
+await secondRoom.leave(false);
+secondRoom = await secondClient.reconnect(secondReconnectToken);
+if (secondRoom.sessionId !== secondSessionId) {
+  throw new Error("Reconnect did not preserve the player's session.");
+}
 let rejection = "";
 const abilitiesUsed = new Set();
 let overwatchTriggered = false;
@@ -416,6 +426,7 @@ try {
       roomCode: firstRoom.roomId,
       synchronizedUnits: firstRoom.state.units.size,
       coverMoveRejected: true,
+      reconnected: true,
       abilitiesUsed: expectedAbilities,
       overwatchTriggered,
       defeatedUnits: defeatedUnits.length,

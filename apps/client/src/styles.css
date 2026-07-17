@@ -63,7 +63,8 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .connection { color: var(--muted); font-size: 12px; text-transform: capitalize; display: flex; align-items: center; gap: 8px; }
 .connection i { width: 7px; height: 7px; border-radius: 50%; background: #596579; }
 .connection-connected i { background: var(--mint); box-shadow: 0 0 12px var(--mint); }
-.connection-connecting i { background: #eac866; animation: pulse 1s infinite; }
+.connection-connecting i, .connection-waking i, .connection-reconnecting i { background: #eac866; box-shadow: 0 0 10px rgba(234,200,102,.5); animation: pulse 1s infinite; }
+.connection-disconnected i { background: var(--red); box-shadow: 0 0 10px rgba(255,107,122,.45); }
 
 .landing-grid {
   position: relative; z-index: 1; max-width: 1180px; margin: 0 auto;
@@ -138,6 +139,7 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
 .code-input { letter-spacing: .24em; font: 600 15px "Space Grotesk"; text-transform: uppercase; }
 .message { margin: 16px 0 0; font-size: 12px; }
 .error-message { color: #ff8e9a; }
+.server-waking-message { margin: 14px 0 0; padding: 10px 12px; color: #eac866; background: rgba(234,200,102,.07); border: 1px solid rgba(234,200,102,.2); border-radius: 9px; font-size: 10px; line-height: 1.5; }
 
 .room-layout { position: relative; z-index: 1; max-width: 1320px; margin: 0 auto; padding-top: 44px; }
 .room-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 30px; margin-bottom: 30px; }
@@ -265,6 +267,17 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
 .match-outcome-overlay strong { margin-top: 8px; color: var(--mint); text-transform: uppercase; letter-spacing: .06em; font: 700 clamp(46px,8vw,86px) "Space Grotesk"; text-shadow: 0 0 45px rgba(71,229,193,.32); }
 .match-outcome-overlay.defeat strong { color: var(--red); text-shadow: 0 0 45px rgba(255,107,122,.3); }
 
+.connection-recovery-overlay { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(4,7,12,.82); backdrop-filter: blur(8px); }
+.standalone-recovery, .fatal-error-shell { position: relative; z-index: 2; min-height: calc(100vh - 96px); display: grid; place-items: center; padding: 40px 20px; }
+.connection-recovery-card, .fatal-error-card { width: min(470px,100%); padding: 38px; text-align: center; }
+.connection-recovery-card h1, .connection-recovery-card h2, .fatal-error-card h1 { margin: 13px 0 10px; font: 600 clamp(27px,4vw,38px) "Space Grotesk"; letter-spacing: -.04em; }
+.connection-recovery-card p, .fatal-error-card p { color: #93a1b5; line-height: 1.65; font-size: 12px; }
+.connection-recovery-card > div, .fatal-error-card > div { display: grid; gap: 9px; margin-top: 24px; }
+.reconnect-spinner { width: 46px; height: 46px; display: block; margin: 0 auto 20px; border: 3px solid #26354a; border-top-color: var(--mint); border-radius: 50%; animation: reconnect-spin .8s linear infinite; }
+.connection-recovery-overlay .connection-recovery-card .reconnect-spinner { border-top-color: #eac866; }
+.fatal-error-shell { min-height: 100vh; background: radial-gradient(circle at 50% 30%, rgba(255,107,122,.09), transparent 35%), var(--bg); }
+.fatal-error-icon { width: 56px; height: 56px; display: grid; place-items: center; margin: 0 auto 18px; color: var(--red); border: 2px solid var(--red); border-radius: 50%; box-shadow: 0 0 28px rgba(255,107,122,.16); font: 700 24px "Space Grotesk"; }
+
 .toast { position: fixed; z-index: 10; left: 50%; bottom: 25px; transform: translateX(-50%); color: #07110f; background: var(--mint); padding: 11px 17px; border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.35); font-size: 12px; font-weight: 700; }
 .toast-error { background: var(--red); color: #26060a; }
 
@@ -273,6 +286,7 @@ input:focus { border-color: rgba(71,229,193,.6); box-shadow: 0 0 0 3px rgba(71,2
 @keyframes ap-pop { 0% { transform: scale(1.35); opacity: .45; } 100% { transform: scale(1); opacity: 1; } }
 @keyframes turn-banner { 0% { opacity: 0; transform: translate(-50%,-18px) scale(.94); } 18%,68% { opacity: 1; transform: translate(-50%,0) scale(1); } 100% { opacity: 0; transform: translate(-50%,-8px) scale(.98); visibility: hidden; } }
 @keyframes outcome-in { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: scale(1); } }
+@keyframes reconnect-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 980px) {
   .landing-grid, .waiting-grid { grid-template-columns: 1fr; }

@@ -19,8 +19,13 @@ import type {
   BoardSelection,
 } from "./game/GameBridge";
 import {
+  clearReconnectSession,
   createTacticsRoom,
   joinTacticsRoom,
+  readReconnectSession,
+  reconnectTacticsRoom,
+  storeReconnectSession,
+  wakeTacticsServer,
   type CpuDifficulty,
   type TacticsRoomConnection,
 } from "./multiplayer/client";
@@ -33,7 +38,9 @@ import type {
 
 type ConnectionStatus =
   | "idle"
+  | "waking"
   | "connecting"
+  | "reconnecting"
   | "connected"
   | "disconnected";
 
@@ -55,6 +62,13 @@ const CPU_OPTIONS: readonly {
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "The room could not be reached.";
+}
+
+function connectionLabel(status: ConnectionStatus): string {
+  if (status === "connected") return "Live room";
+  if (status === "waking") return "Starting server";
+  if (status === "reconnecting") return "Reconnecting";
+  return status;
 }
 
 function actionNotice(payload: {
@@ -95,6 +109,7 @@ export default function App() {
   const [boardAction, setBoardAction] = useState<BoardActionEvent>();
   const [actionLog, setActionLog] = useState<string[]>([]);
   const actionSequence = useRef(0);
+  const attemptedStoredReconnect = useRef(false);
 
   const localPlayerId = room?.sessionId ?? "";
   const localPlayer = snapshot?.players.find(
@@ -114,6 +129,7 @@ export default function App() {
     snapshot?.status === "playing" && Boolean(activePlayer?.isCpu);
 
   const attachRoom = useCallback((nextRoom: TacticsRoomConnection) => {
+    storeReconnectSession(nextRoom);
     setRoom(nextRoom);
     setStatus("connected");
     setError("");
@@ -127,9 +143,11 @@ export default function App() {
 
     // Colyseus resolves the join before the initial schema collections arrive.
     // Build the first snapshot from onStateChange instead of reading them early.
-    nextRoom.onStateChange((state: NetworkMatchState) => {
+    const publishState = (state: NetworkMatchState) => {
       setSnapshot(toMatchSnapshot(state));
-    });
+    };
+    nextRoom.onStateChange(publishState);
+    publishState(nextRoom.state);
     nextRoom.onMessage("action:error", (payload: { message?: string }) => {
       setError(payload.message ?? "The server rejected that action.");
     });
@@ -147,11 +165,59 @@ export default function App() {
       },
     );
     nextRoom.onMessage("match:finished", () => setSelectedUnitId(""));
+    nextRoom.onMessage(
+      "player:reconnecting",
+      (payload: { playerId?: string; graceSeconds?: number }) => {
+        if (payload.playerId !== nextRoom.sessionId) {
+          setNotice(
+            `Opponent disconnected · waiting ${payload.graceSeconds ?? 60}s for reconnect`,
+          );
+        }
+      },
+    );
+    nextRoom.onMessage(
+      "player:reconnected",
+      (payload: { playerId?: string }) => {
+        if (payload.playerId !== nextRoom.sessionId) {
+          setNotice("Opponent reconnected.");
+          window.setTimeout(() => setNotice(""), 1800);
+        }
+      },
+    );
+    nextRoom.onDrop(() => {
+      setStatus("reconnecting");
+      setError("");
+      setNotice("Connection interrupted · reconnecting for up to 60 seconds…");
+    });
+    nextRoom.onReconnect(() => {
+      storeReconnectSession(nextRoom);
+      setStatus("connected");
+      setError("");
+      setNotice("Connection restored.");
+      window.setTimeout(() => setNotice(""), 1800);
+    });
     nextRoom.onLeave(() => {
       setStatus("disconnected");
-      setNotice("Connection closed. Return to the lobby to start again.");
+      setNotice("Reconnect window expired. Retry or return to the lobby.");
     });
   }, []);
+
+  useEffect(() => {
+    if (attemptedStoredReconnect.current) return;
+    attemptedStoredReconnect.current = true;
+    const stored = readReconnectSession();
+    if (!stored) return;
+
+    setStatus("reconnecting");
+    setRoomCode(stored.roomId);
+    void reconnectTacticsRoom(stored.token)
+      .then(attachRoom)
+      .catch(() => {
+        clearReconnectSession();
+        setStatus("idle");
+        setNotice("");
+      });
+  }, [attachRoom]);
 
   const connect = useCallback(
     async (mode: "create" | "cpu" | "join") => {
@@ -161,10 +227,17 @@ export default function App() {
         return setError("Enter the six-character room code.");
       }
 
-      setStatus("connecting");
+      clearReconnectSession();
+      setStatus("waking");
       setError("");
       window.localStorage.setItem("tactics-lite-name", cleanName);
       try {
+        try {
+          await wakeTacticsServer();
+        } catch {
+          // The matchmaking request below is the final connectivity check.
+        }
+        setStatus("connecting");
         const nextRoom =
           mode === "join"
             ? await joinTacticsRoom(roomCode, cleanName)
@@ -181,8 +254,26 @@ export default function App() {
     [attachRoom, cpuDifficulty, displayName, roomCode],
   );
 
+  const retryConnection = useCallback(async () => {
+    const stored = readReconnectSession();
+    if (!stored) {
+      setError("The 60-second reconnect window has expired.");
+      return;
+    }
+    setStatus("reconnecting");
+    setError("");
+    try {
+      attachRoom(await reconnectTacticsRoom(stored.token));
+    } catch (reconnectError) {
+      clearReconnectSession();
+      setStatus("disconnected");
+      setError(errorMessage(reconnectError));
+    }
+  }, [attachRoom]);
+
   const leaveRoom = useCallback(async () => {
-    if (room) await room.leave(true);
+    clearReconnectSession();
+    if (room && status !== "disconnected") await room.leave(true);
     setRoom(undefined);
     setSnapshot(undefined);
     setSelectedUnitId("");
@@ -192,7 +283,7 @@ export default function App() {
     setBoardAction(undefined);
     setActionLog([]);
     window.history.replaceState({}, "", window.location.pathname);
-  }, [room]);
+  }, [room, status]);
 
   const copyInvite = useCallback(async () => {
     if (!snapshot?.roomCode) return;
@@ -324,12 +415,6 @@ export default function App() {
     }
   }, [actionMode, selectedUnit]);
 
-  useEffect(() => {
-    return () => {
-      void room?.leave(true);
-    };
-  }, [room]);
-
   const playerCount = snapshot?.players.length ?? 0;
   const subtitle = useMemo(() => {
     if (!snapshot) return "Small grid. Sharp decisions.";
@@ -356,15 +441,17 @@ export default function App() {
           <span className="brand-mark">TL</span>
           <span>
             <strong>Tactics Lite</strong>
-            <small>Phase 05 · Combat Polish</small>
+            <small>Phase 06 · Stability & Safety</small>
           </span>
         </a>
         <span className={`connection connection-${status}`}>
-          <i /> {status === "connected" ? "Live room" : status}
+          <i /> {connectionLabel(status)}
         </span>
       </header>
 
-      {!room ? (
+      {!room && status === "reconnecting" ? (
+        <ConnectionRecovery error={error} onRetry={retryConnection} />
+      ) : !room ? (
         <Landing
           displayName={displayName}
           roomCode={roomCode}
@@ -490,6 +577,39 @@ export default function App() {
               {error || notice}
             </p>
           )}
+          {(status === "reconnecting" || status === "disconnected") && (
+            <div className="connection-recovery-overlay">
+              <div className="panel connection-recovery-card">
+                <span className="reconnect-spinner" />
+                <span className="eyebrow">
+                  {status === "reconnecting" ? "Reconnecting" : "Connection lost"}
+                </span>
+                <h2>
+                  {status === "reconnecting"
+                    ? "Holding your place in the match."
+                    : "The reconnect window may have expired."}
+                </h2>
+                <p>
+                  Your seat is reserved for up to 60 seconds after a network interruption.
+                </p>
+                <div>
+                  <button
+                    className="primary-button"
+                    onClick={() => void retryConnection()}
+                    disabled={status === "reconnecting"}
+                  >
+                    Retry connection
+                  </button>
+                  <button
+                    className="ghost-button"
+                    onClick={() => void leaveRoom()}
+                  >
+                    Return to lobby
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       )}
     </main>
@@ -509,6 +629,7 @@ interface LandingProps {
 }
 
 function Landing(props: LandingProps) {
+  const isBusy = props.status === "connecting" || props.status === "waking";
   return (
     <section className="landing-grid">
       <div className="hero-copy">
@@ -541,7 +662,7 @@ function Landing(props: LandingProps) {
             value={props.displayName}
             onChange={(event) => props.onDisplayName(event.target.value)}
             placeholder="Your callsign"
-            disabled={props.status === "connecting"}
+            disabled={isBusy}
           />
         </label>
         <div className="mode-cards">
@@ -566,7 +687,7 @@ function Landing(props: LandingProps) {
                         : "difficulty-option"
                     }
                     onClick={() => props.onCpuDifficulty(option.id)}
-                    disabled={props.status === "connecting"}
+                    disabled={isBusy}
                     key={option.id}
                   >
                     <strong>{option.label}</strong>
@@ -578,7 +699,7 @@ function Landing(props: LandingProps) {
             <button
               className="primary-button"
               onClick={() => void props.onConnect("cpu")}
-              disabled={props.status === "connecting"}
+              disabled={isBusy}
             >
               <span>Start solo operation</span>
               <b>▶</b>
@@ -597,7 +718,7 @@ function Landing(props: LandingProps) {
             <button
               className="secondary-button full-width"
               onClick={() => void props.onConnect("create")}
-              disabled={props.status === "connecting"}
+              disabled={isBusy}
             >
               Create private room
             </button>
@@ -616,21 +737,48 @@ function Landing(props: LandingProps) {
                 }
                 placeholder="ABC123"
                 aria-label="Room code"
-                disabled={props.status === "connecting"}
+                disabled={isBusy}
               />
               <button
                 className="secondary-button"
                 onClick={() => void props.onConnect("join")}
-                disabled={props.status === "connecting"}
+                disabled={isBusy}
               >
                 Join
               </button>
             </div>
           </article>
         </div>
+        {props.status === "waking" && (
+          <p className="server-waking-message">
+            Starting the free game server… the first connection after an idle period can take up to a minute.
+          </p>
+        )}
         {props.error && (
           <p className="message error-message">{props.error}</p>
         )}
+      </div>
+    </section>
+  );
+}
+
+function ConnectionRecovery(props: {
+  error: string;
+  onRetry(): Promise<void>;
+}) {
+  return (
+    <section className="standalone-recovery">
+      <div className="panel connection-recovery-card">
+        <span className="reconnect-spinner" />
+        <span className="eyebrow">Restoring session</span>
+        <h1>Rejoining your operation.</h1>
+        <p>
+          The server keeps your seat for 60 seconds after a reload or short network interruption.
+        </p>
+        {props.error && <p className="message error-message">{props.error}</p>}
+        <button className="primary-button" onClick={() => void props.onRetry()}>
+          Retry now
+        </button>
       </div>
     </section>
   );

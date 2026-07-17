@@ -42,6 +42,7 @@ export class BoardScene extends Phaser.Scene {
   private pulseGraphics?: Phaser.GameObjects.Graphics;
   private labels: Phaser.GameObjects.Text[] = [];
   private hoveredTile?: BoardPoint;
+  private touchPreviewActive = false;
   private previousSnapshot?: MatchSnapshot;
   private lastActionId = 0;
 
@@ -114,6 +115,7 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private handlePointerMove(pointer: Phaser.Input.Pointer): void {
+    if (pointer.wasTouch) return;
     const tile = this.pointerTile(pointer);
     if (
       tile?.x === this.hoveredTile?.x &&
@@ -128,6 +130,7 @@ export class BoardScene extends Phaser.Scene {
   private clearHover(): void {
     if (!this.hoveredTile) return;
     this.hoveredTile = undefined;
+    this.touchPreviewActive = false;
     this.renderBoard();
   }
 
@@ -140,6 +143,20 @@ export class BoardScene extends Phaser.Scene {
     const clickedUnit = this.snapshot.units.find(
       (unit) => unit.alive && unit.x === x && unit.y === y,
     );
+    const isOwnSelectableUnit =
+      clickedUnit?.ownerId === this.localPlayerId && !clickedUnit.isDecoy;
+    if (pointer.wasTouch && !isOwnSelectableUnit) {
+      const confirmsPreview =
+        this.hoveredTile?.x === x && this.hoveredTile?.y === y;
+      if (!confirmsPreview) {
+        this.hoveredTile = tile;
+        this.touchPreviewActive = true;
+        this.renderBoard();
+        return;
+      }
+    }
+    this.touchPreviewActive = false;
+    this.hoveredTile = undefined;
     if (clickedUnit) {
       this.bridge.select({ type: "unit", unitId: clickedUnit.id });
     } else {
@@ -707,8 +724,9 @@ export class BoardScene extends Phaser.Scene {
     color: string,
   ): void {
     const center = this.tileCenter(target);
+    const displayText = this.touchPreviewActive ? `${text} · TAP AGAIN` : text;
     const label = this.add
-      .text(center.x, center.y - TILE_SIZE * 0.34, text, {
+      .text(center.x, center.y - TILE_SIZE * 0.34, displayText, {
         color,
         backgroundColor: "#07101bea",
         fontFamily: "Inter, system-ui, sans-serif",

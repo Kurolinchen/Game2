@@ -22,10 +22,12 @@ import {
   type Position,
 } from "@tactics-lite/game-core";
 import { sanitizeDisplayName } from "./displayName.js";
+import { FixedWindowRateLimiter } from "../rateLimit.js";
 import {
   CPU_DIFFICULTY_LABELS,
   CPU_PLAYER_ID,
   chooseCpuAction,
+  createSeededRandom,
   parseCpuDifficulty,
   type CpuDifficulty,
 } from "./cpuOpponent.js";
@@ -38,6 +40,7 @@ import {
 
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_CHANNEL = "$tactics-lite-room-codes";
+const RECONNECT_GRACE_SECONDS = 60;
 
 interface JoinOptions {
   displayName?: unknown;
@@ -46,6 +49,8 @@ interface JoinOptions {
 interface RoomOptions extends JoinOptions {
   opponent?: unknown;
   cpuDifficulty?: unknown;
+  cpuSeed?: unknown;
+  cpuStepDelayMs?: unknown;
 }
 
 interface MoveMessage {
@@ -77,20 +82,25 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
   maxClients: number = GAME_CONFIG.room.maxPlayers;
   private cpuDifficulty?: CpuDifficulty;
   private cpuActionsThisTurn = 0;
+  private cpuRandom: () => number = Math.random;
+  private cpuStepDelayMs = 420;
+  private readonly actionLimiter = new FixedWindowRateLimiter(60, 1_000);
   private readonly cpuClient = {
     sessionId: CPU_PLAYER_ID,
     send: () => undefined,
   } as unknown as Client;
 
   messages = {
-    ready: (client: Client) => this.handleReady(client),
+    ready: (client: Client) =>
+      this.acceptClientMessage(client) && this.handleReady(client),
     move: (client: Client, payload: MoveMessage) =>
-      this.handleMove(client, payload),
+      this.acceptClientMessage(client) && this.handleMove(client, payload),
     attack: (client: Client, payload: AttackMessage) =>
-      this.handleAttack(client, payload),
+      this.acceptClientMessage(client) && this.handleAttack(client, payload),
     ability: (client: Client, payload: AbilityMessage) =>
-      this.handleAbility(client, payload),
-    end_turn: (client: Client) => this.handleEndTurn(client),
+      this.acceptClientMessage(client) && this.handleAbility(client, payload),
+    end_turn: (client: Client) =>
+      this.acceptClientMessage(client) && this.handleEndTurn(client),
   };
 
   async onCreate(options: RoomOptions = {}): Promise<void> {
@@ -106,6 +116,16 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
     if (options.opponent === "cpu") {
       this.cpuDifficulty = parseCpuDifficulty(options.cpuDifficulty);
+      if (typeof options.cpuSeed === "number" && Number.isFinite(options.cpuSeed)) {
+        this.cpuRandom = createSeededRandom(options.cpuSeed);
+      }
+      if (
+        process.env.ALLOW_TEST_OPTIONS === "true" &&
+        typeof options.cpuStepDelayMs === "number" &&
+        Number.isFinite(options.cpuStepDelayMs)
+      ) {
+        this.cpuStepDelayMs = Math.max(0, Math.min(420, options.cpuStepDelayMs));
+      }
       this.maxClients = 1;
       this.addCpuPlayer(this.cpuDifficulty);
     }
@@ -121,6 +141,26 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     player.isCpu = false;
     player.difficulty = "";
     this.state.players.set(client.sessionId, player);
+  }
+
+  onDrop(client: Client): void {
+    const player = this.state.players.get(client.sessionId);
+    if (player) player.connected = false;
+    this.broadcast("player:reconnecting", {
+      playerId: client.sessionId,
+      graceSeconds: RECONNECT_GRACE_SECONDS,
+    });
+    this.allowReconnection(client, RECONNECT_GRACE_SECONDS);
+  }
+
+  onReconnect(client: Client): void {
+    const player = this.state.players.get(client.sessionId);
+    if (player) player.connected = true;
+    this.broadcast(
+      "player:reconnected",
+      { playerId: client.sessionId },
+      { except: client },
+    );
   }
 
   onLeave(client: Client): void {
@@ -746,7 +786,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
     ) {
       return;
     }
-    this.clock.setTimeout(() => this.runCpuStep(), 420);
+    this.clock.setTimeout(() => this.runCpuStep(), this.cpuStepDelayMs);
   }
 
   private runCpuStep(): void {
@@ -791,6 +831,7 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
         blocksLineOfSight: tile.blocksLineOfSight,
         coverValue: tile.coverValue,
       })),
+      random: this.cpuRandom,
     });
 
     if (action.type === "end_turn") {
@@ -900,6 +941,14 @@ export class TacticsRoom extends Room<{ state: MatchState }> {
 
   private reject(client: Client, message: string): void {
     client.send("action:error", { message });
+  }
+
+  private acceptClientMessage(client: Client): boolean {
+    const result = this.actionLimiter.check(client.sessionId);
+    if (!result.allowed) {
+      this.reject(client, "Too many actions at once. Slow down for a moment.");
+    }
+    return result.allowed;
   }
 
   private async reserveRoomCode(): Promise<string> {
