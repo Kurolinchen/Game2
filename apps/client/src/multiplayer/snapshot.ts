@@ -5,7 +5,7 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
   const units: MatchSnapshot["units"] = [];
   const tiles: MatchSnapshot["tiles"] = [];
 
-  state.players.forEach((player) => {
+  state.players?.forEach((player) => {
     players.push({
       id: player.id,
       displayName: player.displayName,
@@ -14,9 +14,9 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
       connected: player.connected,
     });
   });
-  state.units.forEach((unit) => {
+  state.units?.forEach((unit) => {
     const cooldowns: Record<string, number> = {};
-    unit.cooldowns.forEach((remaining, abilityId) => {
+    unit.cooldowns?.forEach((remaining, abilityId) => {
       cooldowns[abilityId] = remaining;
     });
     units.push({
@@ -40,7 +40,7 @@ export function toMatchSnapshot(state: NetworkMatchState): MatchSnapshot {
       cooldowns,
     });
   });
-  state.tiles.forEach((tile) => {
+  state.tiles?.forEach((tile) => {
     tiles.push({
       x: tile.x,
       y: tile.y,

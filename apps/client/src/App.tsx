@@ -99,9 +99,11 @@ export default function App() {
     setError("");
     setNotice("");
     setRoomCode(nextRoom.roomId);
-    setSnapshot(toMatchSnapshot(nextRoom.state));
+    setSnapshot(undefined);
     window.history.replaceState({}, "", `?room=${nextRoom.roomId}`);
 
+    // Colyseus resolves the join before the initial schema collections arrive.
+    // Build the first snapshot from onStateChange instead of reading them early.
     nextRoom.onStateChange((state: NetworkMatchState) => {
       setSnapshot(toMatchSnapshot(state));
     });

@@ -52,7 +52,7 @@ export interface MatchSnapshot {
 
 export interface NetworkPlayerState extends PlayerSnapshot {}
 export interface NetworkUnitState extends Omit<UnitSnapshot, "cooldowns"> {
-  cooldowns: NetworkMap<number>;
+  cooldowns?: NetworkMap<number>;
 }
 export interface NetworkTileState extends TileSnapshot {}
 
@@ -72,8 +72,8 @@ export interface NetworkMatchState {
   actionPointsRemaining: number;
   boardWidth: number;
   boardHeight: number;
-  players: NetworkMap<NetworkPlayerState>;
-  units: NetworkMap<NetworkUnitState>;
-  tiles: NetworkArray<NetworkTileState>;
+  players?: NetworkMap<NetworkPlayerState>;
+  units?: NetworkMap<NetworkUnitState>;
+  tiles?: NetworkArray<NetworkTileState>;
   winnerId: string;
 }
