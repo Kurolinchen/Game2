@@ -18,7 +18,7 @@
     "smoke:multiplayer": "node scripts/smoke-multiplayer.mjs",
     "build": "npm run build -w @tactics-lite/game-core && npm run build -w @tactics-lite/server && npm run build -w @tactics-lite/client",
     "typecheck": "npm run build -w @tactics-lite/game-core && npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run build -w @tactics-lite/game-core && npm run test --workspaces --if-present"
   },
   "devDependencies": {
     "concurrently": "10.0.3",
