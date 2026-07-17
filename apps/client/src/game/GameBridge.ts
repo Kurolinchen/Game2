@@ -18,6 +18,33 @@ export interface TileSelection {
   y: number;
 }
 
+export interface BoardPoint {
+  x: number;
+  y: number;
+}
+
+export interface BoardActionEvent {
+  id: number;
+  type?: "move" | "attack" | "ability" | "overwatch";
+  unitId?: string;
+  attackerId?: string;
+  targetId?: string;
+  abilityId?: AbilityId;
+  abilityName?: string;
+  damage?: number;
+  coverReduction?: number;
+  eliminated?: boolean;
+  apCost?: number;
+  x?: number;
+  y?: number;
+  path?: BoardPoint[];
+  unitPosition?: BoardPoint;
+  targetPosition?: BoardPoint;
+  destroyedCover?: boolean;
+  collided?: boolean;
+  decoyId?: string;
+}
+
 interface PublishedSnapshot {
   snapshot: MatchSnapshot;
   localPlayerId: string;
@@ -27,8 +54,10 @@ interface PublishedSnapshot {
 export class GameBridge extends Phaser.Events.EventEmitter {
   static readonly SNAPSHOT = "snapshot";
   static readonly SELECTION = "selection";
+  static readonly ACTION = "action";
 
   private latestSnapshot?: PublishedSnapshot;
+  private latestAction?: BoardActionEvent;
 
   publishSnapshot(
     snapshot: MatchSnapshot,
@@ -50,6 +79,20 @@ export class GameBridge extends Phaser.Events.EventEmitter {
 
     const { snapshot, localPlayerId, context } = this.latestSnapshot;
     this.emit(GameBridge.SNAPSHOT, snapshot, localPlayerId, context);
+    return true;
+  }
+
+  publishAction(action: BoardActionEvent): void {
+    this.latestAction = action;
+    this.emit(GameBridge.ACTION, action);
+  }
+
+  replayLatestAction(): boolean {
+    if (!this.latestAction) {
+      return false;
+    }
+
+    this.emit(GameBridge.ACTION, this.latestAction);
     return true;
   }
 

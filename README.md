@@ -2,9 +2,13 @@
 
 The playable core of a compact, server-authoritative browser tactics game. Two players join a private room and command three synchronized units each through deterministic, AP-driven combat.
 
-## Phases 1–4 include
+## Phases 1–5 include
 
 - solo matches against Easy, Normal, or Hard CPU opponents
+- hover movement paths, AP costs, attack lines, damage, and cover previews
+- animated movement, shots, push, swap, cover destruction, and eliminations
+- distinct class silhouettes, turn banners, CPU status, and a recent-action log
+- dedicated Solo Operation and Private Duel lobby cards
 - room creation with a shareable six-character code and URL
 - exactly two players with display names and a ready check
 - synchronized 8 x 8 warehouse test grid
@@ -47,7 +51,7 @@ Render Free services spin down while idle, so the first request after a quiet pe
 
 ```bash
 npm run dev        # client and server
-npm run test       # 44 deterministic client, core, server, and CPU tests
+npm run test       # 45 deterministic client, core, server, and CPU tests
 npm run typecheck  # all workspaces
 npm run build      # production builds
 npm run smoke:multiplayer # exercises all abilities, then completes a two-client match

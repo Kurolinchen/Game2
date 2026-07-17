@@ -3,6 +3,7 @@ import { createBoardGame } from "./createGame";
 import {
   GameBridge,
   type ActionMode,
+  type BoardActionEvent,
   type BoardInteractionContext,
   type BoardSelection,
 } from "./GameBridge";
@@ -13,6 +14,7 @@ interface BoardProps {
   localPlayerId: string;
   selectedUnitId: string;
   actionMode: ActionMode;
+  actionEvent?: BoardActionEvent;
   onSelection(selection: BoardSelection): void;
 }
 
@@ -21,6 +23,7 @@ export function Board({
   localPlayerId,
   selectedUnitId,
   actionMode,
+  actionEvent,
   onSelection,
 }: BoardProps) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -39,6 +42,10 @@ export function Board({
     const context: BoardInteractionContext = { selectedUnitId, actionMode };
     bridge.publishSnapshot(snapshot, localPlayerId, context);
   }, [actionMode, bridge, snapshot, localPlayerId, selectedUnitId]);
+
+  useEffect(() => {
+    if (actionEvent) bridge.publishAction(actionEvent);
+  }, [actionEvent, bridge]);
 
   useEffect(() => {
     bridge.on(GameBridge.SELECTION, onSelection);
