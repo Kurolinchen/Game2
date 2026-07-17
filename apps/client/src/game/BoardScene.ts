@@ -42,6 +42,7 @@ export class BoardScene extends Phaser.Scene {
   private pulseGraphics?: Phaser.GameObjects.Graphics;
   private labels: Phaser.GameObjects.Text[] = [];
   private hoveredTile?: BoardPoint;
+  private dpr = 1;
   private touchPreviewActive = false;
   private previousSnapshot?: MatchSnapshot;
   private lastActionId = 0;
@@ -62,6 +63,12 @@ export class BoardScene extends Phaser.Scene {
       return;
     }
     this.cameras.main.setBackgroundColor("#0b101a");
+    // The game buffer is CANVAS_SIZE × devicePixelRatio; zooming the camera by
+    // that factor keeps every draw call in the 720-unit world space while the
+    // canvas rasterizes at native display resolution.
+    this.dpr = this.scale.gameSize.width / CANVAS_SIZE;
+    this.cameras.main.setZoom(this.dpr);
+    this.cameras.main.centerOn(CANVAS_SIZE / 2, CANVAS_SIZE / 2);
     this.graphics = this.add.graphics();
     this.pulseGraphics = this.add.graphics();
     this.input.on("pointerup", this.handlePointer, this);
@@ -195,8 +202,10 @@ export class BoardScene extends Phaser.Scene {
 
   private pointerTile(pointer: Phaser.Input.Pointer): BoardPoint | undefined {
     if (!this.snapshot) return undefined;
-    const x = Math.floor((pointer.x - BOARD_PADDING) / TILE_SIZE);
-    const y = Math.floor((pointer.y - BOARD_PADDING) / TILE_SIZE);
+    // worldX/worldY apply the camera's DPR zoom, mapping the pointer back
+    // into the 720-unit world space the tile math expects.
+    const x = Math.floor((pointer.worldX - BOARD_PADDING) / TILE_SIZE);
+    const y = Math.floor((pointer.worldY - BOARD_PADDING) / TILE_SIZE);
     return x >= 0 &&
       y >= 0 &&
       x < this.snapshot.boardWidth &&
@@ -562,6 +571,7 @@ export class BoardScene extends Phaser.Scene {
         fontFamily: "Inter, system-ui, sans-serif",
         fontSize: unit.classId === "breacher" ? "17px" : "20px",
         fontStyle: "bold",
+        resolution: this.dpr,
       })
       .setOrigin(0.5);
     this.labels.push(label);
@@ -762,6 +772,7 @@ export class BoardScene extends Phaser.Scene {
         fontSize: "13px",
         fontStyle: "bold",
         padding: { x: 8, y: 5 },
+        resolution: this.dpr,
       })
       .setOrigin(0.5, 1);
     this.labels.push(label);

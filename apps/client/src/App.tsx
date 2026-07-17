@@ -1084,8 +1084,9 @@ function MatchSidebar(props: MatchSidebarProps) {
       type="button"
       onClick={() => setIsOpen((open) => !open)}
       aria-expanded={isOpen}
+      aria-controls="squad-panel action-log-panel"
     >
-      <span>{isOpen ? "Hide controls" : "Show controls"}</span>
+      <span>{isOpen ? "Hide squad & battle log" : "Squad & battle log"}</span>
       <b>{isOpen ? "×" : "⌃"}</b>
     </button>
   );
@@ -1099,7 +1100,6 @@ function MatchSidebar(props: MatchSidebarProps) {
     );
     return (
       <aside className={`match-sidebar ${isOpen ? "open" : ""}`}>
-        {sidebarToggle}
         <div className={`panel result-panel ${props.didWin ? "victory" : "defeat"}`}>
           <span className="eyebrow">Match complete</span>
           <div className="result-icon">{props.didWin ? "V" : "×"}</div>
@@ -1136,6 +1136,7 @@ function MatchSidebar(props: MatchSidebarProps) {
             Return to lobby
           </button>
         </div>
+        {sidebarToggle}
         <SquadPanel {...props} />
         <ActionLog entries={props.actionLog} />
       </aside>
@@ -1144,7 +1145,6 @@ function MatchSidebar(props: MatchSidebarProps) {
 
   return (
     <aside className={`match-sidebar ${isOpen ? "open" : ""}`}>
-      {sidebarToggle}
       <div className="panel turn-panel">
         <div className="turn-heading-row">
           <span className="eyebrow">Round {props.snapshot.currentRound}</span>
@@ -1289,6 +1289,7 @@ function MatchSidebar(props: MatchSidebarProps) {
           Surrender match
         </button>
       </div>
+      {sidebarToggle}
       <SquadPanel {...props} />
       <ActionLog entries={props.actionLog} />
     </aside>
@@ -1300,7 +1301,7 @@ function SquadPanel(props: MatchSidebarProps) {
     (unit) => unit.ownerId === props.localPlayerId && !unit.isDecoy,
   );
   return (
-    <div className="panel roster-panel">
+    <div className="panel roster-panel" id="squad-panel">
       <span className="eyebrow">Your squad</span>
       {ownUnits.map((unit) => (
         <button
@@ -1327,7 +1328,7 @@ function SquadPanel(props: MatchSidebarProps) {
 
 function ActionLog({ entries }: { entries: string[] }) {
   return (
-    <div className="panel action-log-panel">
+    <div className="panel action-log-panel" id="action-log-panel">
       <span className="eyebrow">Recent actions</span>
       {entries.length > 0 ? (
         <ol>
