@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@tactics-lite/game-core";
 import type {
   ActionMode,
+  BoardActionEvent,
   BoardSelection,
 } from "./game/GameBridge";
 import {
@@ -90,6 +92,9 @@ export default function App() {
   const [selectedUnitId, setSelectedUnitId] = useState("");
   const [actionMode, setActionMode] = useState<ActionMode>("move");
   const [cpuDifficulty, setCpuDifficulty] = useState<CpuDifficulty>("normal");
+  const [boardAction, setBoardAction] = useState<BoardActionEvent>();
+  const [actionLog, setActionLog] = useState<string[]>([]);
+  const actionSequence = useRef(0);
 
   const localPlayerId = room?.sessionId ?? "";
   const localPlayer = snapshot?.players.find(
@@ -105,12 +110,17 @@ export default function App() {
   const didWin = snapshot?.winnerId === localPlayerId;
   const cpuPlayer = snapshot?.players.find((player) => player.isCpu);
   const isCpuMatch = Boolean(cpuPlayer);
+  const isCpuThinking =
+    snapshot?.status === "playing" && Boolean(activePlayer?.isCpu);
 
   const attachRoom = useCallback((nextRoom: TacticsRoomConnection) => {
     setRoom(nextRoom);
     setStatus("connected");
     setError("");
     setNotice("");
+    setBoardAction(undefined);
+    setActionLog([]);
+    actionSequence.current = 0;
     setRoomCode(nextRoom.roomId);
     setSnapshot(undefined);
     window.history.replaceState({}, "", `?room=${nextRoom.roomId}`);
@@ -125,15 +135,14 @@ export default function App() {
     });
     nextRoom.onMessage(
       "action:accepted",
-      (payload: {
-        type?: string;
-        damage?: number;
-        eliminated?: boolean;
-        apCost?: number;
-        abilityName?: string;
-      }) => {
+      (payload: Omit<BoardActionEvent, "id">) => {
+        const event = { ...payload, id: ++actionSequence.current };
         setError("");
         setNotice(actionNotice(payload));
+        setBoardAction(event);
+        setActionLog((entries) =>
+          [actionNotice(payload), ...entries].slice(0, 3),
+        );
         window.setTimeout(() => setNotice(""), 1400);
       },
     );
@@ -180,6 +189,8 @@ export default function App() {
     setStatus("idle");
     setError("");
     setNotice("");
+    setBoardAction(undefined);
+    setActionLog([]);
     window.history.replaceState({}, "", window.location.pathname);
   }, [room]);
 
@@ -345,7 +356,7 @@ export default function App() {
           <span className="brand-mark">TL</span>
           <span>
             <strong>Tactics Lite</strong>
-            <small>Phase 04 · CPU Opponents</small>
+            <small>Phase 05 · Combat Polish</small>
           </span>
         </a>
         <span className={`connection connection-${status}`}>
@@ -394,21 +405,60 @@ export default function App() {
           {snapshot && snapshot.status !== "waiting" ? (
             <div className="match-grid">
               <div className="board-panel panel">
-                <Suspense
-                  fallback={
-                    <div className="board-loading">
-                      Initializing tactical grid…
+                <div className="board-stage">
+                  <Suspense
+                    fallback={
+                      <div className="board-loading">
+                        Initializing tactical grid…
+                      </div>
+                    }
+                  >
+                    <Board
+                      snapshot={snapshot}
+                      localPlayerId={localPlayerId}
+                      selectedUnitId={selectedUnitId}
+                      actionMode={actionMode}
+                      actionEvent={boardAction}
+                      onSelection={handleBoardSelection}
+                    />
+                  </Suspense>
+                  {snapshot.status === "playing" && (
+                    <div
+                      className={
+                        isMyTurn
+                          ? "turn-banner turn-banner-local"
+                          : "turn-banner turn-banner-opponent"
+                      }
+                      key={`${snapshot.currentRound}-${snapshot.activePlayerId}`}
+                    >
+                      <small>Round {snapshot.currentRound}</small>
+                      <strong>
+                        {isMyTurn
+                          ? "Your turn"
+                          : activePlayer?.isCpu
+                            ? "CPU turn"
+                            : "Opponent turn"}
+                      </strong>
                     </div>
-                  }
-                >
-                  <Board
-                    snapshot={snapshot}
-                    localPlayerId={localPlayerId}
-                    selectedUnitId={selectedUnitId}
-                    actionMode={actionMode}
-                    onSelection={handleBoardSelection}
-                  />
-                </Suspense>
+                  )}
+                  {isCpuThinking && (
+                    <div className="cpu-thinking">
+                      <i /><span>CPU is thinking…</span>
+                    </div>
+                  )}
+                  {snapshot.status === "finished" && (
+                    <div
+                      className={
+                        didWin
+                          ? "match-outcome-overlay victory"
+                          : "match-outcome-overlay defeat"
+                      }
+                    >
+                      <small>Operation complete</small>
+                      <strong>{didWin ? "Victory" : "Defeat"}</strong>
+                    </div>
+                  )}
+                </div>
               </div>
               <MatchSidebar
                 snapshot={snapshot}
@@ -417,6 +467,8 @@ export default function App() {
                 actionMode={actionMode}
                 isMyTurn={isMyTurn}
                 didWin={didWin}
+                isCpuThinking={isCpuThinking}
+                actionLog={actionLog}
                 onActionMode={handleActionMode}
                 onSelectUnit={setSelectedUnitId}
                 onEndTurn={() => room.send("end_turn")}
@@ -475,10 +527,10 @@ function Landing(props: LandingProps) {
 
       <div className="lobby-card panel">
         <div className="panel-heading">
-          <span className="step-number">02</span>
+          <span className="step-number">01</span>
           <div>
-            <h2>Enter the operation</h2>
-            <p>No account required.</p>
+            <h2>Choose your operation</h2>
+            <p>One callsign. Two ways to deploy.</p>
           </div>
         </div>
         <label>
@@ -492,66 +544,89 @@ function Landing(props: LandingProps) {
             disabled={props.status === "connecting"}
           />
         </label>
-        <div className="difficulty-picker">
-          <span>CPU difficulty</span>
-          <div className="difficulty-options">
-            {CPU_OPTIONS.map((option) => (
-              <button
-                type="button"
-                className={
-                  props.cpuDifficulty === option.id
-                    ? "difficulty-option selected"
-                    : "difficulty-option"
+        <div className="mode-cards">
+          <article className="mode-card solo-mode">
+            <div className="mode-card-heading">
+              <span className="mode-icon">◎</span>
+              <div>
+                <small>Solo operation</small>
+                <h3>Outthink the CPU</h3>
+              </div>
+            </div>
+            <p>Deploy instantly against a server-controlled squad.</p>
+            <div className="difficulty-picker">
+              <span>Difficulty</span>
+              <div className="difficulty-options">
+                {CPU_OPTIONS.map((option) => (
+                  <button
+                    type="button"
+                    className={
+                      props.cpuDifficulty === option.id
+                        ? "difficulty-option selected"
+                        : "difficulty-option"
+                    }
+                    onClick={() => props.onCpuDifficulty(option.id)}
+                    disabled={props.status === "connecting"}
+                    key={option.id}
+                  >
+                    <strong>{option.label}</strong>
+                    <small>{option.description}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              className="primary-button"
+              onClick={() => void props.onConnect("cpu")}
+              disabled={props.status === "connecting"}
+            >
+              <span>Start solo operation</span>
+              <b>▶</b>
+            </button>
+          </article>
+
+          <article className="mode-card duel-mode">
+            <div className="mode-card-heading">
+              <span className="mode-icon">◇</span>
+              <div>
+                <small>Private duel</small>
+                <h3>Challenge a friend</h3>
+              </div>
+            </div>
+            <p>Create a private room or enter an existing operation code.</p>
+            <button
+              className="secondary-button full-width"
+              onClick={() => void props.onConnect("create")}
+              disabled={props.status === "connecting"}
+            >
+              Create private room
+            </button>
+            <div className="divider">
+              <span>or join by code</span>
+            </div>
+            <div className="join-row">
+              <input
+                className="code-input"
+                maxLength={6}
+                value={props.roomCode}
+                onChange={(event) =>
+                  props.onRoomCode(
+                    event.target.value.replace(/[^a-z0-9]/gi, "").toUpperCase(),
+                  )
                 }
-                onClick={() => props.onCpuDifficulty(option.id)}
+                placeholder="ABC123"
+                aria-label="Room code"
                 disabled={props.status === "connecting"}
-                key={option.id}
+              />
+              <button
+                className="secondary-button"
+                onClick={() => void props.onConnect("join")}
+                disabled={props.status === "connecting"}
               >
-                <strong>{option.label}</strong>
-                <small>{option.description}</small>
+                Join
               </button>
-            ))}
-          </div>
-        </div>
-        <button
-          className="primary-button"
-          onClick={() => void props.onConnect("cpu")}
-          disabled={props.status === "connecting"}
-        >
-          <span>Play versus CPU</span>
-          <b>▶</b>
-        </button>
-        <button
-          className="secondary-button full-width private-room-button"
-          onClick={() => void props.onConnect("create")}
-          disabled={props.status === "connecting"}
-        >
-          <span>Create private room</span>
-        </button>
-        <div className="divider">
-          <span>or join by code</span>
-        </div>
-        <div className="join-row">
-          <input
-            className="code-input"
-            maxLength={6}
-            value={props.roomCode}
-            onChange={(event) =>
-              props.onRoomCode(
-                event.target.value.replace(/[^a-z0-9]/gi, "").toUpperCase(),
-              )
-            }
-            placeholder="ABC123"
-            aria-label="Room code"
-            disabled={props.status === "connecting"}
-          />
-          <button
-            className="secondary-button"
-            onClick={() => void props.onConnect("join")}
-            disabled={props.status === "connecting"}
-          >
-            Join
-          </button>
+            </div>
+          </article>
         </div>
         {props.error && (
           <p className="message error-message">{props.error}</p>
@@ -657,6 +732,8 @@ interface MatchSidebarProps {
   actionMode: ActionMode;
   isMyTurn: boolean;
   didWin: boolean;
+  isCpuThinking: boolean;
+  actionLog: string[];
   onActionMode(mode: ActionMode): void;
   onSelectUnit(unitId: string): void;
   onEndTurn(): void;
@@ -664,12 +741,26 @@ interface MatchSidebarProps {
 }
 
 function MatchSidebar(props: MatchSidebarProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const sidebarToggle = (
+    <button
+      className="sidebar-toggle"
+      type="button"
+      onClick={() => setIsOpen((open) => !open)}
+      aria-expanded={isOpen}
+    >
+      <span>{isOpen ? "Hide controls" : "Show controls"}</span>
+      <b>{isOpen ? "×" : "⌃"}</b>
+    </button>
+  );
+
   if (props.snapshot.status === "finished") {
     const winner = props.snapshot.players.find(
       (player) => player.id === props.snapshot.winnerId,
     );
     return (
-      <aside className="match-sidebar">
+      <aside className={`match-sidebar ${isOpen ? "open" : ""}`}>
+        {sidebarToggle}
         <div className={`panel result-panel ${props.didWin ? "victory" : "defeat"}`}>
           <span className="eyebrow">Match complete</span>
           <div className="result-icon">{props.didWin ? "V" : "×"}</div>
@@ -680,12 +771,14 @@ function MatchSidebar(props: MatchSidebarProps) {
           </button>
         </div>
         <SquadPanel {...props} />
+        <ActionLog entries={props.actionLog} />
       </aside>
     );
   }
 
   return (
-    <aside className="match-sidebar">
+    <aside className={`match-sidebar ${isOpen ? "open" : ""}`}>
+      {sidebarToggle}
       <div className="panel turn-panel">
         <div className="turn-heading-row">
           <span className="eyebrow">Round {props.snapshot.currentRound}</span>
@@ -693,8 +786,18 @@ function MatchSidebar(props: MatchSidebarProps) {
             {props.isMyTurn ? "Your turn" : "Opponent"}
           </span>
         </div>
+        {props.isCpuThinking && (
+          <div className="thinking-status">
+            <i /> CPU is thinking…
+          </div>
+        )}
         <div className="ap-display">
-          <strong>{props.snapshot.actionPointsRemaining}</strong>
+          <strong
+            className="ap-number"
+            key={props.snapshot.actionPointsRemaining}
+          >
+            {props.snapshot.actionPointsRemaining}
+          </strong>
           <div>
             <span>Action points</span>
             <div className="ap-pips">
@@ -717,7 +820,7 @@ function MatchSidebar(props: MatchSidebarProps) {
           <div className="unit-card">
             <div className="unit-card-heading">
               <span className={`class-badge ${props.selectedUnit.classId}`}>
-                {props.selectedUnit.name.slice(0, 1)}
+                {classIcon(props.selectedUnit.classId)}
               </span>
               <div>
                 <h2>{props.selectedUnit.name}</h2>
@@ -752,6 +855,7 @@ function MatchSidebar(props: MatchSidebarProps) {
           >
             <b>Move</b>
             <small>1 AP / tile</small>
+            <span className="action-tooltip">Choose a highlighted tile. Hover to preview the path and AP cost.</span>
           </button>
           <button
             className={props.actionMode === "attack" ? "action-button active attack" : "action-button attack"}
@@ -765,6 +869,7 @@ function MatchSidebar(props: MatchSidebarProps) {
           >
             <b>Attack</b>
             <small>{GAME_CONFIG.actions.standardAttackCost} AP</small>
+            <span className="action-tooltip">Fire at a highlighted enemy. Damage and cover are shown on hover.</span>
           </button>
           {props.selectedUnit &&
             isCombatClass(props.selectedUnit.classId) &&
@@ -794,6 +899,12 @@ function MatchSidebar(props: MatchSidebarProps) {
                       ? `Cooldown ${cooldown}`
                       : `${ability.actionPointCost} AP · R${ability.range}`}
                   </small>
+                  {cooldown > 0 && (
+                    <span className="cooldown-badge" aria-label={`${cooldown} rounds cooldown`}>
+                      {cooldown}
+                    </span>
+                  )}
+                  <span className="action-tooltip">{ability.description}</span>
                 </button>
               );
             })}
@@ -810,6 +921,7 @@ function MatchSidebar(props: MatchSidebarProps) {
         </button>
       </div>
       <SquadPanel {...props} />
+      <ActionLog entries={props.actionLog} />
     </aside>
   );
 }
@@ -830,7 +942,9 @@ function SquadPanel(props: MatchSidebarProps) {
           onClick={() => unit.alive && props.onSelectUnit(unit.id)}
           disabled={!unit.alive}
         >
-          <i className={`class-dot ${unit.classId}`} />
+          <i className={`class-icon-small ${unit.classId}`}>
+            {classIcon(unit.classId)}
+          </i>
           <span>
             <strong>{unit.name}</strong>
             <small>{unit.hp}/{unit.maxHp} HP</small>
@@ -842,10 +956,36 @@ function SquadPanel(props: MatchSidebarProps) {
   );
 }
 
+function ActionLog({ entries }: { entries: string[] }) {
+  return (
+    <div className="panel action-log-panel">
+      <span className="eyebrow">Recent actions</span>
+      {entries.length > 0 ? (
+        <ol>
+          {entries.map((entry, index) => (
+            <li key={`${entry}-${index}`}>
+              <i /> <span>{entry}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p>Actions from both squads will appear here.</p>
+      )}
+    </div>
+  );
+}
+
 function isCombatClass(classId: string): classId is UnitClassId {
   return (
     classId === "breacher" || classId === "sniper" || classId === "trickster"
   );
+}
+
+function classIcon(classId: string): string {
+  if (classId === "breacher") return "⬢";
+  if (classId === "sniper") return "⌖";
+  if (classId === "trickster") return "◇";
+  return "◈";
 }
 
 function passiveText(classId: UnitClassId): string {

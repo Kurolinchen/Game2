@@ -60,4 +60,21 @@ describe("GameBridge", () => {
     expect(bridge.replayLatestSnapshot()).toBe(false);
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it("replays the latest visual action for a late board scene", () => {
+    const bridge = new GameBridge();
+    const listener = vi.fn();
+    const action = {
+      id: 7,
+      type: "move" as const,
+      unitId: "unit-1",
+      path: [{ x: 2, y: 1 }],
+    };
+
+    bridge.publishAction(action);
+    bridge.on(GameBridge.ACTION, listener);
+
+    expect(bridge.replayLatestAction()).toBe(true);
+    expect(listener).toHaveBeenCalledWith(action);
+  });
 });
