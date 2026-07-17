@@ -13,7 +13,7 @@
   "dependencies": {
     "@colyseus/sdk": "0.17.43",
     "@tactics-lite/game-core": "0.1.0",
-    "phaser": "3.90.0",
+    "phaser": "4.2.1",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
