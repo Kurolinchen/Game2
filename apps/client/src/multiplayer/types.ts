@@ -9,7 +9,7 @@ export interface PlayerSnapshot {
 export interface UnitSnapshot {
   id: string;
   ownerId: string;
-  classId: "breacher" | "sniper" | "trickster";
+  classId: "breacher" | "sniper" | "trickster" | "decoy";
   name: string;
   x: number;
   y: number;
@@ -19,6 +19,12 @@ export interface UnitSnapshot {
   attackRange: number;
   attackDamage: number;
   alive: boolean;
+  isDecoy: boolean;
+  sourceUnitId: string;
+  movementDiscountAvailable: boolean;
+  overwatchActive: boolean;
+  overwatchExpiresRound: number;
+  cooldowns: Record<string, number>;
 }
 
 export interface TileSnapshot {
@@ -45,7 +51,9 @@ export interface MatchSnapshot {
 }
 
 export interface NetworkPlayerState extends PlayerSnapshot {}
-export interface NetworkUnitState extends UnitSnapshot {}
+export interface NetworkUnitState extends Omit<UnitSnapshot, "cooldowns"> {
+  cooldowns: NetworkMap<number>;
+}
 export interface NetworkTileState extends TileSnapshot {}
 
 interface NetworkMap<T> {

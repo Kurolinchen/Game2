@@ -55,7 +55,7 @@ The pure `game-core` package keeps deterministic calculations free of Colyseus, 
 | `tiles` | synchronized floor, low-cover, and high-obstacle tiles |
 | `winnerId` | authoritative elimination winner |
 
-`PlayerState` stores `id`, `displayName`, `slot`, `ready`, and `connected`. `UnitState` stores identity, class, owner, position, HP, movement range, attack range, damage, and alive state. `TileState` stores position, floor/cover/obstacle type, walkability, sight blocking, and deterministic cover value.
+`PlayerState` stores `id`, `displayName`, `slot`, `ready`, and `connected`. `UnitState` stores identity, class, owner, position, HP, movement and attack stats, alive/decoy state, per-ability cooldowns, Overwatch state, and the Trickster movement discount. `TileState` stores position, floor/cover/obstacle type, walkability, sight blocking, and deterministic cover value.
 
 ## 4. Server/client split
 
@@ -95,7 +95,7 @@ The pure `game-core` package keeps deterministic calculations free of Colyseus, 
 
 ## Deliberately deferred
 
-Accounts, persistence, special abilities, reconnect tokens, rematches, matchmaking, ranking, AI, additional maps, and mobile polish remain outside Phase 2. The boundaries above leave explicit extension points for them.
+Accounts, persistence, reconnect tokens, rematches, matchmaking, ranking, AI, additional maps, and mobile polish remain outside Phase 3. The boundaries above leave explicit extension points for them.
 
 ## 7. Phase 2 implementation
 
@@ -108,3 +108,15 @@ Phase 2 turns the network proof of concept into a complete elimination match:
 5. Zero HP marks a unit eliminated and frees its tile. Eliminating all three enemy units finishes the match and records the winner.
 6. The Phaser board previews reachable tiles and attackable targets while React presents AP, unit stats, squad status, and the final result.
 7. The multiplayer smoke script creates two real clients and completes a five-round elimination match against a passive opponent.
+
+## 8. Phase 3 implementation
+
+Phase 3 adds each class's signature tactical identity without weakening the server-authoritative boundary:
+
+1. Ability costs, ranges, cooldowns, descriptions, targets, and class ownership live in shared data-driven definitions.
+2. Breacher gains Kinetic Push and destructible-cover Breach, plus one-point protection from adjacent damage.
+3. Sniper gains distance-scaling Long Shot and a one-use Overwatch reaction, plus bonus damage at distance four or more.
+4. Trickster gains unit Swap and a synchronized 2 HP Decoy, plus a one-AP discount on its first movement each turn.
+5. Cooldowns decrement at the start of the owning player's turn; Overwatch expires at that same boundary if it did not trigger.
+6. The React HUD exposes costs, cooldowns, descriptions, and passives while Phaser previews valid unit and tile targets.
+7. The multiplayer smoke test activates all six abilities, verifies an Overwatch reaction and cover destruction, then completes the authoritative elimination match.

@@ -79,6 +79,23 @@ describe("Phase 2 movement", () => {
     ).toMatchObject({ ok: true, cost: 2 });
   });
 
+  it("applies the Trickster first-move AP discount once", () => {
+    expect(
+      validateMovementAction({
+        from: { x: 0, y: 0 },
+        to: { x: 1, y: 0 },
+        boardWidth: 5,
+        boardHeight: 5,
+        blocked: [],
+        occupied: [],
+        maxDistance: 4,
+        actionPointsAvailable: 0,
+        actionPointCostPerTile: 1,
+        actionPointDiscount: 1,
+      }),
+    ).toMatchObject({ ok: true, cost: 0 });
+  });
+
   it("rejects paths beyond the unit movement range", () => {
     expect(
       validateMovementAction({

@@ -3,8 +3,30 @@ import type {
   AttackRequest,
   AttackTile,
   AttackValidation,
+  DamageCalculation,
   Position,
 } from "./types.js";
+
+export function calculateModifiedDamage(
+  baseDamage: number,
+  distance: number,
+  attackerClassId: string | undefined,
+  targetClassId: string | undefined,
+  coverReduction = 0,
+): DamageCalculation {
+  const sniperBonus = attackerClassId === "sniper" && distance >= 4 ? 1 : 0;
+  const breacherReduction =
+    targetClassId === "breacher" && distance === 1 ? 1 : 0;
+  return {
+    damage: Math.max(
+      1,
+      baseDamage + sniperBonus - coverReduction - breacherReduction,
+    ),
+    sniperBonus,
+    breacherReduction,
+    coverReduction,
+  };
+}
 
 export function lineBetween(from: Position, to: Position): Position[] {
   const points: Position[] = [];
@@ -88,10 +110,17 @@ export function validateAttack(request: AttackRequest): AttackValidation {
   }
 
   const coverReduction = getCoverReduction(attacker, target, tiles);
+  const damage = calculateModifiedDamage(
+    attacker.attackDamage,
+    distance,
+    attacker.classId,
+    target.classId,
+    coverReduction,
+  );
   return {
     ok: true,
     cost: actionPointCost,
-    damage: Math.max(1, attacker.attackDamage - coverReduction),
+    damage: damage.damage,
     coverReduction,
     distance,
   };

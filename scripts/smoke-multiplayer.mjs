@@ -77,6 +77,7 @@ function findMove(state, ownerId) {
       unit.movementRange,
       state.actionPointsRemaining,
       GAME_CONFIG.actions.movementCostPerTile,
+      unit.movementDiscountAvailable ? 1 : 0,
     );
 
     for (const target of enemies) {
@@ -153,7 +154,12 @@ const secondRoom = await secondClient.joinById(firstRoom.roomId, {
   displayName: "Bravo",
 });
 let rejection = "";
-firstRoom.onMessage("action:accepted", () => {});
+const abilitiesUsed = new Set();
+let overwatchTriggered = false;
+firstRoom.onMessage("action:accepted", (payload) => {
+  if (payload.type === "ability") abilitiesUsed.add(payload.abilityId);
+  if (payload.type === "overwatch") overwatchTriggered = true;
+});
 secondRoom.onMessage("action:accepted", () => {});
 firstRoom.onMessage("match:finished", () => {});
 secondRoom.onMessage("match:finished", () => {});
@@ -198,6 +204,181 @@ try {
     throw new Error("The server applied a rejected movement request.");
   }
 
+  const alphaSniper = units(firstRoom.state).find(
+    (unit) => unit.ownerId === firstRoom.sessionId && unit.classId === "sniper",
+  );
+  const alphaTrickster = units(firstRoom.state).find(
+    (unit) =>
+      unit.ownerId === firstRoom.sessionId && unit.classId === "trickster",
+  );
+  const bravoBreacher = units(firstRoom.state).find(
+    (unit) =>
+      unit.ownerId === secondRoom.sessionId && unit.classId === "breacher",
+  );
+  const bravoSniper = units(firstRoom.state).find(
+    (unit) => unit.ownerId === secondRoom.sessionId && unit.classId === "sniper",
+  );
+  if (!alphaSniper || !alphaTrickster || !bravoBreacher || !bravoSniper) {
+    throw new Error("The Phase 3 ability test squad did not spawn.");
+  }
+
+  firstRoom.send("ability", {
+    unitId: alphaTrickster.id,
+    abilityId: "swap",
+    targetUnitId: alphaSniper.id,
+  });
+  await waitFor(
+    () => alphaTrickster.x === 0 && alphaTrickster.y === 3,
+    "Swap to exchange allied positions",
+  );
+  firstRoom.send("ability", {
+    unitId: alphaTrickster.id,
+    abilityId: "decoy",
+    x: 1,
+    y: 3,
+  });
+  await waitFor(
+    () => units(firstRoom.state).some((unit) => unit.isDecoy),
+    "Decoy to create a synchronized unit",
+  );
+  firstRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === secondRoom.sessionId,
+    "Bravo's first turn",
+  );
+
+  secondRoom.send("ability", {
+    unitId: bravoSniper.id,
+    abilityId: "overwatch",
+  });
+  await waitFor(() => bravoSniper.overwatchActive, "Overwatch activation");
+  secondRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === firstRoom.sessionId,
+    "Alpha's second turn",
+  );
+
+  const tricksterHpBeforeOverwatch = alphaTrickster.hp;
+  firstRoom.send("move", { unitId: alphaTrickster.id, x: 2, y: 3 });
+  await waitFor(
+    () =>
+      overwatchTriggered &&
+      !bravoSniper.overwatchActive &&
+      alphaTrickster.hp < tricksterHpBeforeOverwatch,
+    "the Overwatch reaction shot",
+  );
+  firstRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === secondRoom.sessionId,
+    "Bravo's second turn",
+  );
+
+  secondRoom.send("move", { unitId: bravoBreacher.id, x: 6, y: 2 });
+  await waitFor(
+    () => bravoBreacher.x === 6 && bravoBreacher.y === 2,
+    "Bravo Breacher movement",
+  );
+  secondRoom.send("ability", {
+    unitId: bravoBreacher.id,
+    abilityId: "breach",
+    x: 5,
+    y: 2,
+  });
+  await waitFor(
+    () =>
+      [...firstRoom.state.tiles.values()].some(
+        (tile) => tile.x === 5 && tile.y === 2 && tile.tileType === "floor",
+      ),
+    "Breach to destroy low cover",
+  );
+  secondRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === firstRoom.sessionId,
+    "Alpha's third turn",
+  );
+
+  firstRoom.send("move", { unitId: alphaSniper.id, x: 1, y: 5 });
+  await waitFor(
+    () => alphaSniper.x === 1 && alphaSniper.y === 5,
+    "Alpha Sniper movement",
+  );
+  firstRoom.send("ability", {
+    unitId: alphaSniper.id,
+    abilityId: "long-shot",
+    targetUnitId: bravoSniper.id,
+  });
+  await waitFor(() => !bravoSniper.alive, "a lethal Long Shot");
+  firstRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === secondRoom.sessionId,
+    "Bravo's third turn",
+  );
+
+  secondRoom.send("move", { unitId: bravoBreacher.id, x: 3, y: 2 });
+  await waitFor(
+    () => bravoBreacher.x === 3 && bravoBreacher.y === 2,
+    "Bravo Breacher repositioning",
+  );
+  secondRoom.send("ability", {
+    unitId: bravoBreacher.id,
+    abilityId: "breach",
+    x: 2,
+    y: 2,
+  });
+  await waitFor(
+    () =>
+      [...firstRoom.state.tiles.values()].some(
+        (tile) => tile.x === 2 && tile.y === 2 && tile.tileType === "floor",
+      ),
+    "a second Breach after its one-turn cooldown",
+  );
+  secondRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === firstRoom.sessionId,
+    "Alpha's fourth turn",
+  );
+  firstRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === secondRoom.sessionId,
+    "Bravo's fourth turn",
+  );
+
+  secondRoom.send("move", { unitId: bravoBreacher.id, x: 2, y: 2 });
+  await waitFor(
+    () => bravoBreacher.x === 2 && bravoBreacher.y === 2,
+    "Bravo Breacher push setup",
+  );
+  const tricksterHpBeforePush = alphaTrickster.hp;
+  secondRoom.send("ability", {
+    unitId: bravoBreacher.id,
+    abilityId: "kinetic-push",
+    targetUnitId: alphaTrickster.id,
+  });
+  await waitFor(
+    () =>
+      alphaTrickster.y === 4 && alphaTrickster.hp < tricksterHpBeforePush,
+    "Kinetic Push movement and damage",
+  );
+  secondRoom.send("end_turn");
+  await waitFor(
+    () => firstRoom.state.activePlayerId === firstRoom.sessionId,
+    "the post-ability elimination match",
+  );
+
+  const expectedAbilities = [
+    "swap",
+    "decoy",
+    "overwatch",
+    "breach",
+    "long-shot",
+    "kinetic-push",
+  ];
+  if (expectedAbilities.some((abilityId) => !abilitiesUsed.has(abilityId))) {
+    throw new Error(
+      `Not every Phase 3 ability synchronized: ${[...abilitiesUsed].join(", ")}.`,
+    );
+  }
+
   let cycles = 0;
   while (firstRoom.state.status === "playing" && cycles < 80) {
     if (firstRoom.state.activePlayerId === firstRoom.sessionId) {
@@ -235,6 +416,8 @@ try {
       roomCode: firstRoom.roomId,
       synchronizedUnits: firstRoom.state.units.size,
       coverMoveRejected: true,
+      abilitiesUsed: expectedAbilities,
+      overwatchTriggered,
       defeatedUnits: defeatedUnits.length,
       winner: "Alpha",
       completedRounds: firstRoom.state.currentRound,

@@ -1,7 +1,10 @@
 import Phaser from "phaser";
 import {
+  ABILITY_DEFINITIONS,
   GAME_CONFIG,
   findReachableTiles,
+  hasLineOfSight,
+  manhattanDistance,
   positionKey,
   validateAttack,
   type AttackTile,
@@ -96,8 +99,8 @@ export class BoardScene extends Phaser.Scene {
     const selectedUnit = this.snapshot.units.find(
       (unit) => unit.id === this.interaction.selectedUnitId && unit.alive,
     );
-    const reachable = this.reachableTileKeys(selectedUnit);
-    const validTargets = this.validAttackTargets(selectedUnit);
+    const reachable = this.targetTileKeys(selectedUnit);
+    const validTargets = this.validUnitTargets(selectedUnit);
 
     for (const tile of this.snapshot.tiles) {
       const left = BOARD_PADDING + tile.x * TILE_SIZE;
@@ -231,10 +234,24 @@ export class BoardScene extends Phaser.Scene {
       this.graphics.lineStyle(4, 0xffffff, 0.95);
       this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.36);
     }
+    if (unit.overwatchActive) {
+      this.graphics.lineStyle(2, 0x6ea8ff, 0.9);
+      this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.43);
+    }
     this.graphics.fillStyle(unitColor, 0.18);
     this.graphics.fillCircle(centerX, centerY, TILE_SIZE * 0.34);
-    this.graphics.fillStyle(unitColor, 1);
-    this.graphics.fillCircle(centerX, centerY, TILE_SIZE * 0.24);
+    this.graphics.fillStyle(unitColor, unit.isDecoy ? 0.45 : 1);
+    if (unit.isDecoy) {
+      this.graphics.fillRoundedRect(
+        centerX - TILE_SIZE * 0.21,
+        centerY - TILE_SIZE * 0.21,
+        TILE_SIZE * 0.42,
+        TILE_SIZE * 0.42,
+        8,
+      );
+    } else {
+      this.graphics.fillCircle(centerX, centerY, TILE_SIZE * 0.24);
+    }
     this.graphics.lineStyle(3, isLocal ? 0xeafffa : 0x2a1015, 0.9);
     this.graphics.strokeCircle(centerX, centerY, TILE_SIZE * 0.24);
 
@@ -286,16 +303,64 @@ export class BoardScene extends Phaser.Scene {
     );
   }
 
-  private reachableTileKeys(selectedUnit?: UnitSnapshot): Set<string> {
+  private targetTileKeys(selectedUnit?: UnitSnapshot): Set<string> {
     if (
       !this.snapshot ||
       !selectedUnit ||
       selectedUnit.ownerId !== this.localPlayerId ||
       this.snapshot.activePlayerId !== this.localPlayerId ||
-      this.interaction.actionMode !== "move"
+      selectedUnit.isDecoy
     ) {
       return new Set();
     }
+
+    const mode = this.interaction.actionMode;
+    if (mode === "breach") {
+      if (
+        selectedUnit.classId !== "breacher" ||
+        this.snapshot.actionPointsRemaining <
+          ABILITY_DEFINITIONS.breach.actionPointCost
+      ) {
+        return new Set();
+      }
+      return new Set(
+        this.snapshot.tiles
+          .filter(
+            (tile) =>
+              tile.tileType === "cover" &&
+              manhattanDistance(selectedUnit, tile) === 1,
+          )
+          .map(positionKey),
+      );
+    }
+
+    if (mode === "decoy") {
+      if (
+        selectedUnit.classId !== "trickster" ||
+        this.snapshot.actionPointsRemaining <
+          ABILITY_DEFINITIONS.decoy.actionPointCost
+      ) {
+        return new Set();
+      }
+      const occupied = new Set(
+        this.snapshot.units.filter((unit) => unit.alive).map(positionKey),
+      );
+      const tiles = this.attackTiles();
+      return new Set(
+        this.snapshot.tiles
+          .filter(
+            (tile) =>
+              tile.walkable &&
+              !occupied.has(positionKey(tile)) &&
+              manhattanDistance(selectedUnit, tile) <=
+                ABILITY_DEFINITIONS.decoy.range &&
+              hasLineOfSight(selectedUnit, tile, tiles),
+          )
+          .map(positionKey),
+      );
+    }
+
+    if (mode !== "move") return new Set();
 
     const blocked = this.snapshot.tiles
       .filter((tile) => !tile.walkable)
@@ -313,26 +378,66 @@ export class BoardScene extends Phaser.Scene {
         selectedUnit.movementRange,
         this.snapshot.actionPointsRemaining,
         GAME_CONFIG.actions.movementCostPerTile,
+        selectedUnit.movementDiscountAvailable ? 1 : 0,
       ).map(positionKey),
     );
   }
 
-  private validAttackTargets(selectedUnit?: UnitSnapshot): Set<string> {
+  private validUnitTargets(selectedUnit?: UnitSnapshot): Set<string> {
     if (
       !this.snapshot ||
       !selectedUnit ||
       selectedUnit.ownerId !== this.localPlayerId ||
       this.snapshot.activePlayerId !== this.localPlayerId ||
-      this.interaction.actionMode !== "attack"
+      selectedUnit.isDecoy
     ) {
       return new Set();
     }
-    const tiles: AttackTile[] = this.snapshot.tiles.map((tile) => ({
-      x: tile.x,
-      y: tile.y,
-      blocksLineOfSight: tile.blocksLineOfSight,
-      coverValue: tile.coverValue,
-    }));
+    const tiles = this.attackTiles();
+    const mode = this.interaction.actionMode;
+    if (mode === "kinetic-push") {
+      return new Set(
+        this.snapshot.units
+          .filter(
+            (unit) =>
+              unit.alive &&
+              unit.ownerId !== this.localPlayerId &&
+              selectedUnit.classId === "breacher" &&
+              manhattanDistance(selectedUnit, unit) === 1,
+          )
+          .map((unit) => unit.id),
+      );
+    }
+    if (mode === "long-shot") {
+      return new Set(
+        this.snapshot.units
+          .filter(
+            (unit) =>
+              unit.alive &&
+              unit.ownerId !== this.localPlayerId &&
+              selectedUnit.classId === "sniper" &&
+              manhattanDistance(selectedUnit, unit) <=
+                ABILITY_DEFINITIONS["long-shot"].range &&
+              hasLineOfSight(selectedUnit, unit, tiles),
+          )
+          .map((unit) => unit.id),
+      );
+    }
+    if (mode === "swap") {
+      return new Set(
+        this.snapshot.units
+          .filter(
+            (unit) =>
+              unit.alive &&
+              unit.id !== selectedUnit.id &&
+              selectedUnit.classId === "trickster" &&
+              manhattanDistance(selectedUnit, unit) <=
+                ABILITY_DEFINITIONS.swap.range,
+          )
+          .map((unit) => unit.id),
+      );
+    }
+    if (mode !== "attack") return new Set();
     return new Set(
       this.snapshot.units
         .filter(
@@ -347,6 +452,17 @@ export class BoardScene extends Phaser.Scene {
             }).ok,
         )
         .map((unit) => unit.id),
+    );
+  }
+
+  private attackTiles(): AttackTile[] {
+    return (
+      this.snapshot?.tiles.map((tile) => ({
+        x: tile.x,
+        y: tile.y,
+        blocksLineOfSight: tile.blocksLineOfSight,
+        coverValue: tile.coverValue,
+      })) ?? []
     );
   }
 }

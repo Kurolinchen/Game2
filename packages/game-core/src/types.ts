@@ -41,6 +41,27 @@ export interface TurnResult {
 
 export type UnitClassId = "breacher" | "sniper" | "trickster";
 
+export type AbilityId =
+  | "kinetic-push"
+  | "breach"
+  | "long-shot"
+  | "overwatch"
+  | "swap"
+  | "decoy";
+
+export type AbilityTargetType = "enemy" | "unit" | "cover" | "tile" | "self";
+
+export interface AbilityDefinition {
+  id: AbilityId;
+  classId: UnitClassId;
+  name: string;
+  description: string;
+  targetType: AbilityTargetType;
+  actionPointCost: number;
+  range: number;
+  cooldown: number;
+}
+
 export interface UnitDefinition {
   classId: UnitClassId;
   name: string;
@@ -61,6 +82,7 @@ export interface MovementActionRequest {
   maxDistance: number;
   actionPointsAvailable: number;
   actionPointCostPerTile: number;
+  actionPointDiscount?: number;
 }
 
 export type MovementActionRejection =
@@ -81,6 +103,7 @@ export interface AttackUnit extends Position {
   attackRange: number;
   attackDamage: number;
   alive: boolean;
+  classId?: string;
 }
 
 export interface AttackTile extends Position {
@@ -113,3 +136,24 @@ export type AttackValidation =
       distance: number;
     }
   | { ok: false; reason: AttackRejection };
+
+export interface DamageCalculation {
+  damage: number;
+  sniperBonus: number;
+  breacherReduction: number;
+  coverReduction: number;
+}
+
+export interface PushRequest {
+  attacker: Position;
+  target: Position;
+  boardWidth: number;
+  boardHeight: number;
+  blocked: readonly Position[];
+  occupied: readonly Position[];
+}
+
+export interface PushResult {
+  destination: Position;
+  collided: boolean;
+}
