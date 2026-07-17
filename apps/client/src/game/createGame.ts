@@ -4,7 +4,9 @@ import type { GameBridge } from "./GameBridge";
 
 export function createBoardGame(parent: HTMLElement, bridge: GameBridge): Phaser.Game {
   return new Phaser.Game({
-    type: Phaser.AUTO,
+    // The board uses Phaser's 2D graphics API exclusively. Pinning the Canvas
+    // renderer avoids blank boards when WebGL is unavailable or disabled.
+    type: Phaser.CANVAS,
     parent,
     width: 720,
     height: 720,
@@ -20,4 +22,3 @@ export function createBoardGame(parent: HTMLElement, bridge: GameBridge): Phaser
     },
   });
 }
-
