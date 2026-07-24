@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@colyseus/schema": "4.0.27",
+    "@colyseus/schema": "4.0.28",
     "@tactics-lite/game-core": "0.1.0",
     "colyseus": "0.17.10"
   },
